@@ -71,15 +71,6 @@ contract LeverV1Pool is ILeverV1Pool {
         string memory tokenName = string(abi.encodePacked(OriginalCollection.name(), "-LP-LFI"));
         string memory nftCollectionName = string(abi.encodePacked(tokenName, "-NFT"));
 
-        /* (bool success, bytes memory data) = _originalCollection.staticcall(
-            abi.encodeWithSelector(IERC721Minimal.symbol.selector)
-        );
-        require(success && data.length >= 32);
-        string memory collectionName = string(
-            abi.encodePacked(abi.decode(data, (string)), "-LP-LFI")
-        );
-        string memory nftCollectionName = string(abi.encodePacked(collectionName, "-NFT")); */
-
         wrappedCollection = address(new LeverV1ERC721L(nftCollectionName, nftCollectionName, address(this)));
         poolToken = address(
             new LeverV1ERC20Essential(tokenName, tokenName, address(this))
@@ -104,15 +95,6 @@ contract LeverV1Pool is ILeverV1Pool {
         bool success = PoolToken.mintTo(msg.sender, amount);
 
         require(success, "LeverV1Pool: LP Token mint");
-        /* (bool success, bytes memory data) = poolToken.call(
-            abi.encodeWithSelector(
-                IERC20Essential.mintTo.selector,
-                msg.sender,
-                msg.value
-            )
-        ); */
-        
-        //require(success, "Failed to deposit");
     }
 
     // trade in token for pool earnings
@@ -123,25 +105,11 @@ contract LeverV1Pool is ILeverV1Pool {
         // lp token balance must be greater than requested collected amt
         IERC20Essential PoolToken = IERC20Essential(poolToken);
         uint256 userBalance = PoolToken.balanceOf(msg.sender);
-        /* (bool balanceSuccess, bytes memory balanceData) = poolToken.staticcall(
-            abi.encodeWithSelector(
-                IERC20Essential.balanceOf.selector,
-                msg.sender
-            )
-        );
-        require(balanceSuccess && balanceData.length >= 32);
-        uint256 userBalance = abi.decode(balanceData, (uint256)); */
+
         require(userBalance >= amountRequested, "AMRLTB"); // amount requested less than balance
 
         // total supply
         uint256 totalSupply = PoolToken.totalSupply();
-        /* (bool supplySuccess, bytes memory supplyData) = poolToken.staticcall(
-            abi.encodeWithSelector(IERC20Essential.totalSupply.selector)
-        );
-        require(supplySuccess && supplyData.length >= 32);
-
-        uint256 owedBalance = (((amountRequested * 1 ether) /
-            abi.decode(supplyData, (uint256))) * poolValue) / 1 ether; */
         
         uint256 owedBalance = (((amountRequested * 1 ether) /
             totalSupply) * poolValue) / 1 ether;
@@ -149,14 +117,6 @@ contract LeverV1Pool is ILeverV1Pool {
         // successfully burn tokens before any important action
         bool success = PoolToken.burnFrom(msg.sender, amountRequested);
         require(success, "LeverV1Pool: LP Token burn");
-        /* (bool burnSuccess, bytes memory burnData) = poolToken.call(
-            abi.encodeWithSelector(
-                IERC20Essential.burnFrom.selector,
-                msg.sender,
-                amountRequested
-            )
-        );
-        require(burnSuccess); */
 
         payable(msg.sender).transfer(owedBalance);
     }
