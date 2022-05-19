@@ -44,11 +44,15 @@ describe("LeverV1Pool", () => {
     it("Create Pool", async () => {
       const LeverV1Pool = await ethers.getContractFactory("LeverV1Pool");
       leverV1Pool = await LeverV1Pool.deploy(
-        await alice.getAddress(),
-        nftCollection.address,
-        0,
-        0,
-        0
+        await alice.getAddress(), // factory
+        nftCollection.address, // collection ✔️
+        ethers.utils.parseEther("40").div(1e2), // collateral coverage ratio (40%)
+        ethers.utils.parseEther("14").div(1e3), // interest rate (1.4%)
+        ethers.BigNumber.from(60 * 60 * 24), // compound daily
+        ethers.utils.parseEther("15").div(1e2), // burn rate (15%)
+        0, // loan term
+        ethers.utils.parseEther("30"), // min liquidity ✔️
+        ethers.utils.parseEther("5").div(1e2) // min deposit (0.05 ETH) ✔️
       );
       await leverV1Pool.deployed();
 

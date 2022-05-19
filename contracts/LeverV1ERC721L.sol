@@ -34,4 +34,17 @@ contract LeverV1ERC721L is ERC721 {
 
         return true;
     }
+
+    function transferFrom(
+        address from, 
+        address to, 
+        uint256 tokenId
+    ) public virtual override {}
+    
+    function safeTransferFrom(
+        address from,
+        address to,
+        uint256 tokenId,
+        bytes memory data
+    ) public virtual override {}
 }
