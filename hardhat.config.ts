@@ -56,6 +56,10 @@ const config: HardhatUserConfig = {
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
+    kovan: {
+      url: "https://kovan.infura.io/v3/be138a5fe1e04bc6bf7c8c0eedbf0b71",
+      accounts: [`${process.env.PRIVATE_KEY}`],
+    },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,

@@ -23,6 +23,9 @@ contract CollectionPriceOracle is ChainlinkClient {
     address private oracle;
     bytes32 private jobId;
     uint256 private fee;
+
+    event RequestOracle(bytes32 requestId);
+    event FulfillRequest(bytes32 requestId, string category, uint256 value);
     
     /**
      * Network: Kovan
@@ -66,7 +69,10 @@ contract CollectionPriceOracle is ChainlinkClient {
         request.addInt("times", timesAmount);
         
         // Sends the request
-        return sendChainlinkRequestTo(oracle, request, fee);
+        bytes32 requestId = sendChainlinkRequestTo(oracle, request, fee);
+
+        emit RequestOracle(requestId);
+        return requestId;
     }
     
     /**
@@ -75,6 +81,8 @@ contract CollectionPriceOracle is ChainlinkClient {
     function fulfill(bytes32 _requestId, uint256 _volume) public recordChainlinkFulfillment(_requestId)
     {
         volume = _volume;
+        
+        emit FulfillRequest(_requestId, "volume", _volume);
     }
 
     // function withdrawLink() external {} - Implement a withdraw function to avoid locking your LINK in the contract

@@ -1,30 +1,13 @@
 import { expect } from "chai";
 import { ethers, waffle } from "hardhat";
-import { BigNumber, Contract, Signer } from "ethers";
-import { LeverV1Pool, ERC721Minimal } from "../src/Types";
-
-/* describe("Greeter", function () {
-  it("Should return the new greeting once it's changed", async function () {
-    const Greeter = await ethers.getContractFactory("Greeter");
-    const greeter = await Greeter.deploy("Hello, world!");
-    await greeter.deployed();
-
-    expect(await greeter.greet()).to.equal("Hello, world!");
-
-    const setGreetingTx = await greeter.setGreeting("Hola, mundo!");
-
-    // wait until the transaction is mined
-    await setGreetingTx.wait();
-
-    expect(await greeter.greet()).to.equal("Hola, mundo!");
-  });
-});
- */
+import { BigNumber, Contract, Signer, Wallet } from "ethers";
+import { LeverV1Pool, ERC721Minimal, Marketplace } from "../src/Types";
 
 describe("LeverV1Pool", () => {
   let alice: Signer, bob: Signer;
   let leverV1Pool: Contract /* : LeverV1Pool */;
   let nftCollection: Contract /* : ERC721Minimal */;
+  let marketplace: Contract;
   let poolToken: Contract;
 
   before(async () => {
@@ -41,10 +24,32 @@ describe("LeverV1Pool", () => {
       expect(await nftCollection.symbol()).to.equal("LFI");
     });
 
+    it("Setup Marketplace", async () => {
+      const Marketplace = await ethers.getContractFactory("Marketplace");
+      marketplace = await Marketplace.deploy(nftCollection.address);
+      await marketplace.deployed();
+
+      const approveTxn = await nftCollection
+        .connect(alice)
+        .setApprovalForAll(marketplace.address, true);
+      await approveTxn.wait();
+    });
+
+    it("Mint collection", async () => {
+      const mintTxn = await nftCollection
+        .connect(alice)
+        .mint(marketplace.address, 10);
+      await mintTxn.wait();
+
+      expect(await nftCollection.totalSupply()).to.equal(BigNumber.from("10"));
+    });
+
     it("Create Pool", async () => {
       const LeverV1Pool = await ethers.getContractFactory("LeverV1Pool");
       leverV1Pool = await LeverV1Pool.deploy(
         await alice.getAddress(), // factory
+        marketplace.address, // temp - marketplace
+        "0x0000000000000000000000000000000000000000", // oracle
         nftCollection.address, // collection ✔️
         ethers.utils.parseEther("40").div(1e2), // collateral coverage ratio (40%)
         ethers.utils.parseEther("14").div(1e3), // interest rate (1.4%)
@@ -144,6 +149,96 @@ describe("LeverV1Pool", () => {
       it("Ether", async () => {
         expect(await alice.getBalance()).to.be.above(alicePrevBalance);
       });
+    });
+  });
+
+  describe("Borrow", () => {
+    const targetTokenId = BigNumber.from(1);
+    let wrappedCollection: Contract;
+
+    before(async () => {
+      /* console.log(
+        ethers.utils.formatEther(
+          await waffle.provider.getBalance(leverV1Pool.address)
+        )
+      ); */
+      wrappedCollection = await ethers.getContractAt(
+        "ERC721Minimal",
+        await leverV1Pool.wrappedCollection()
+      );
+    });
+
+    it("Setup Marketplace", async () => {
+      const depositTxn = await alice.sendTransaction({
+        to: marketplace.address,
+        value: ethers.utils.parseEther("5"),
+      });
+      await depositTxn.wait();
+
+      expect(await waffle.provider.getBalance(marketplace.address)).to.equal(
+        ethers.utils.parseEther("5")
+      );
+
+      const listTxn = await marketplace
+        .connect(alice)
+        .list(targetTokenId, ethers.utils.parseEther("0.5"));
+      await listTxn.wait();
+
+      expect(await marketplace.listings(targetTokenId)).to.equal(
+        ethers.utils.parseEther("0.5")
+      );
+    });
+
+    it("Borrow", async () => {
+      const priorPoolBalance = await waffle.provider.getBalance(
+        leverV1Pool.address
+      );
+      const borrowTxn = await leverV1Pool.connect(bob).borrow(targetTokenId, {
+        value: ethers.utils.parseEther("0.3"),
+      });
+      await borrowTxn.wait();
+
+      expect(
+        await wrappedCollection.balanceOf(await bob.getAddress())
+      ).to.equal(BigNumber.from(1));
+      expect(await nftCollection.balanceOf(leverV1Pool.address)).to.equal(
+        BigNumber.from(1)
+      );
+      expect(await waffle.provider.getBalance(leverV1Pool.address)).to.equal(
+        priorPoolBalance.sub(await ethers.utils.parseEther("0.2"))
+      );
+    });
+
+    it("Repay Part 1", async () => {
+      // repay partial
+      const repayTxn = await leverV1Pool.connect(bob).repay(targetTokenId, {
+        value: ethers.utils.parseEther("0.1"),
+      });
+      await repayTxn.wait();
+    });
+
+    it("Repay Part 2", async () => {
+      // finalized repayment installment
+      const repayTxn = await leverV1Pool.connect(bob).repay(targetTokenId, {
+        value: ethers.utils.parseEther("0.3"),
+      });
+      await repayTxn.wait();
+
+      expect(
+        await wrappedCollection.balanceOf(await bob.getAddress())
+      ).to.equal(BigNumber.from(0));
+      expect(await nftCollection.balanceOf(leverV1Pool.address)).to.equal(
+        BigNumber.from(0)
+      );
+      expect(await nftCollection.balanceOf(await bob.getAddress())).to.equal(
+        BigNumber.from(1)
+      );
+
+      /* console.log(
+        ethers.utils.formatEther(
+          await waffle.provider.getBalance(leverV1Pool.address)
+        )
+      ); */
     });
   });
 });
