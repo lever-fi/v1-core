@@ -124,7 +124,7 @@ contract LeverV1Pool is ILeverV1Pool {
             new LeverV1ERC20Essential(tokenName, tokenName, address(this))
         );
 
-        emit Created(
+        emit Create(
             _originalCollection,
             _collateralCoverageRatio,
             _interestRate,

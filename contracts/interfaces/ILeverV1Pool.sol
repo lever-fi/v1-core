@@ -23,8 +23,8 @@ interface ILeverV1Pool {
         uint256 tokenId /* bytes memory loanHash */
     ) external payable;
 
-    event Created(
-        address originalCollection,
+    event Create(
+        address indexed originalCollection,
         uint256 collaterateCoverageRatio,
         uint256 interestRate,
         uint256 compoundInterval,
@@ -33,9 +33,9 @@ interface ILeverV1Pool {
         uint256 minLiquduity,
         uint256 minDeposit
     );
-    event Deposit(address depositor, uint256 value);
-    event Collect(address collector, uint256 value);
-    event Borrow(address borrower, uint256 value, uint256 tokenId);
-    event Repay(address borrower, uint256 value, uint256 tokenId); // maybe change to borrow hash
+    event Deposit(address indexed depositor, uint256 value);
+    event Collect(address indexed collector, uint256 value);
+    event Borrow(address indexed borrower, uint256 value, uint256 tokenId);
+    event Repay(address indexed borrower, uint256 value, uint256 tokenId); // maybe change to borrow hash
     event Liquidate(uint256 tokenId, uint256 value);
 }
