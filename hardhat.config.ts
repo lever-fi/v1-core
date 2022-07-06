@@ -60,6 +60,10 @@ const config: HardhatUserConfig = {
       url: "https://kovan.infura.io/v3/be138a5fe1e04bc6bf7c8c0eedbf0b71",
       accounts: [`${process.env.PRIVATE_KEY}`],
     },
+    rinkeby: {
+      url: "https://eth-rinkeby.alchemyapi.io/v2/m7ztgybHHIKMMEX6bOnYrXpGN9NDAqwq",
+      accounts: [`${process.env.PRIVATE_KEY}`],
+    },
   },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
