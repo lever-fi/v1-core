@@ -2,26 +2,11 @@
 pragma solidity ^0.8.0;
 
 interface ILeverV1Pool {
-    function deposit() external payable;
-
-    function collect(uint256 amountRequested) external;
-
-    function quickSell(uint256 tokenId) external;
-
-    function quickSell(uint256 tokenId, uint256 value) external;
-
-    function compound() external;
-
-    function liquidate(uint256 tokenId, uint256 value) external;
-
-    function liquidateAll() external;
-
-    function borrow(uint256 tokenId) external payable;
-
-    function repay(
-        /* address borrower,  */
-        uint256 tokenId /* bytes memory loanHash */
-    ) external payable;
+    error Error_NotSuccessful();
+    error Error_InsufficientBalance();
+    error Error_InsufficientLiquidity();
+    error Error_ExistingLoan();
+    error Error_InsufficientContribution();
 
     event Create(
         address indexed originalCollection,
@@ -38,4 +23,27 @@ interface ILeverV1Pool {
     event Borrow(address indexed borrower, uint256 value, uint256 tokenId);
     event Repay(address indexed borrower, uint256 value, uint256 tokenId); // maybe change to borrow hash
     event Liquidate(uint256 tokenId, uint256 value);
+
+    function deposit() external payable;
+
+    function collect(uint256 amountRequested) external;
+
+    function quickSell(uint256 tokenId) external;
+
+    function quickSell(uint256 tokenId, uint256 value) external;
+
+    function compound() external;
+
+    function liquidate(uint256 tokenId, uint256 value) external;
+
+    function liquidateAll() external;
+
+    function borrow(bytes calldata assetData, bytes calldata purchaseData)
+        external
+        payable;
+
+    function repay(
+        /* address borrower,  */
+        uint256 tokenId /* bytes memory loanHash */
+    ) external payable;
 }

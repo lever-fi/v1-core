@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "./interfaces/ILeverV1Pool.sol";
-import "./interfaces/IERC20Essential.sol";
-import "./interfaces/IERC721Minimal.sol";
+import {ILeverV1Pool} from "./interfaces/ILeverV1Pool.sol";
+import {IERC20Essential} from "./interfaces/IERC20Essential.sol";
+import {IERC721Minimal} from "./interfaces/IERC721Minimal.sol";
 
-import "./LeverV1ERC20Essential.sol";
-import "./LeverV1ERC721L.sol";
+import {LeverV1ERC20Essential} from "./LeverV1ERC20Essential.sol";
+import {LeverV1ERC721L} from "./LeverV1ERC721L.sol";
+
+import {IPurchaseAgent} from "./interfaces/IPurchaseAgent.sol";
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 
-import "./extras/IMarketplace.sol";
+import {IMarketplace} from "./extras/IMarketplace.sol";
 
 import "hardhat/console.sol";
 
-contract LeverV1Pool is ILeverV1Pool {
+// reentrancy guard
+// ownable
+// update rate functions
+contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
     /*
         [holdings] how much ETH has a certain address contributed
         [principals] how much ETH does a borrower owe. Aggregated value
@@ -34,6 +40,7 @@ contract LeverV1Pool is ILeverV1Pool {
 
     // used for compounding
     uint256[] public activePositions;
+    // add and remove from activepositions
 
     // bytes to loan struct for checking specific loan status. one address can have multiple loans
 
@@ -45,6 +52,7 @@ contract LeverV1Pool is ILeverV1Pool {
     address public immutable marketplace;
 
     address public oracle;
+    address public purchaseAgent;
 
     uint256 public collateralCoverageRatio;
     uint256 public interestRate;
@@ -56,6 +64,8 @@ contract LeverV1Pool is ILeverV1Pool {
     uint256 public riskIndex;
 
     struct Loan {
+        // hash for loan
+        // r s v
         uint256 lastCompound;
         uint256 principal;
         address borrower;
@@ -66,10 +76,11 @@ contract LeverV1Pool is ILeverV1Pool {
         bool active;
     }
 
-    /* struct Offer {
-        address owner;
-        uint256 amount;
-    } */
+    struct BorrowAssetType {
+        uint256 tokenId;
+        uint256 price;
+        Marketplace marketplace;
+    }
 
     /*
     factory contract location
@@ -82,6 +93,7 @@ contract LeverV1Pool is ILeverV1Pool {
         address _factory,
         address _marketplace,
         address _oracle,
+        address _purchaseAgent,
         address _originalCollection,
         uint256 _collateralCoverageRatio,
         uint256 _interestRate,
@@ -94,6 +106,7 @@ contract LeverV1Pool is ILeverV1Pool {
         factory = _factory;
         marketplace = _marketplace;
         oracle = _oracle;
+        purchaseAgent = _purchaseAgent;
         originalCollection = _originalCollection;
         collateralCoverageRatio = _collateralCoverageRatio;
         interestRate = _interestRate;
@@ -138,7 +151,10 @@ contract LeverV1Pool is ILeverV1Pool {
 
     // deposit funds into pool and get lp tokens in return
     function deposit() external payable override {
-        require(msg.value >= minDeposit, "LeverV1Pool: Deposit < required"); // deposit less than min required deposit
+        if (msg.value < minDeposit) {
+            revert Error_InsufficientBalance();
+        }
+        //require(msg.value >= minDeposit, "LeverV1Pool: Deposit < required"); // deposit less than min required deposit
         IERC20Essential PoolToken = IERC20Essential(poolToken);
         uint256 aPost = address(this).balance;
         uint256 totalSupply = PoolToken.totalSupply();
@@ -154,7 +170,10 @@ contract LeverV1Pool is ILeverV1Pool {
 
         bool success = PoolToken.mintTo(msg.sender, amount);
 
-        require(success, "LeverV1Pool: LP Token mint");
+        if (!success) {
+            revert Error_NotSuccessful();
+        }
+        //require(success, "LeverV1Pool: LP Token mint");
 
         emit Deposit(msg.sender, msg.value);
     }
@@ -164,28 +183,47 @@ contract LeverV1Pool is ILeverV1Pool {
         uint256 poolValue = address(this).balance;
         //require(poolValue >= minLiquidity, "Balance < min liquidity"); // contract balance less than min liquidity
 
-        // lp token balance must be greater than requested collected amt
+        // lp token balance must be greater than requested collect amt
         IERC20Essential PoolToken = IERC20Essential(poolToken);
         uint256 userBalance = PoolToken.balanceOf(msg.sender);
 
-        require(userBalance >= amountRequested, "AMRLTB"); // amount requested less than balance
+        if (userBalance < amountRequested) {
+            revert Error_InsufficientBalance();
+        }
+        //require(userBalance >= amountRequested, "AMRLTB"); // amount requested less than balance
 
         // total supply
         uint256 totalSupply = PoolToken.totalSupply();
-
         uint256 owedBalance = (((amountRequested * 1 ether) / totalSupply) *
             poolValue) / 1 ether;
 
-        require(
+        if (poolValue <= owedBalance) {
+            revert Error_InsufficientLiquidity();
+        }
+
+        /*  if (poolValue - owedBalance < minLiquidity) {
+            revert Error_InsufficientLiqudity();
+        } */
+        /* require(
             poolValue >= owedBalance,
             "LeverV1Pool: not enough liquidity to collect balance"
-        );
+        ); */
 
         // successfully burn tokens before any important action
         bool success = PoolToken.burnFrom(msg.sender, amountRequested);
-        require(success, "LeverV1Pool: LP Token burn");
 
-        payable(msg.sender).transfer(owedBalance);
+        if (!success) {
+            revert Error_NotSuccessful();
+        }
+        //require(success, "LeverV1Pool: LP Token burn");
+
+        (bool sent, bytes memory data) = payable(msg.sender).call{
+            value: owedBalance
+        }(""); //.transfer(owedBalance);
+
+        if (!sent) {
+            revert Error_NotSuccessful();
+        }
 
         emit Collect(msg.sender, owedBalance);
     }
@@ -196,84 +234,156 @@ contract LeverV1Pool is ILeverV1Pool {
     function quickSell(uint256 tokenId, uint256 value) external override {}
 
     // chainlink keeper function
-    function compound() external override {}
+    function compound() external override {
+        uint256[] _newActivePositions = [];
+
+        for (
+            uint256 positionIndex = 0;
+            positionIndex < activePositions.length;
+            positionIndex++
+        ) {
+            uint256 position = activePositions[positionIndex];
+            if (positions[position].expirationTimestamp < block.timestamp) {
+                // autoliquidate position
+            } else {
+                _newActivePositions.push(activePositions[position]);
+            }
+
+            positions[position].lastCompound = block.timestamp;
+            positions[position].principal +=
+                (positions[position].principal * 1 ether * interestRate) /
+                1 ether;
+        }
+
+        activePositions = _newActivePositions;
+    }
 
     // liquidate current position - mindful of gas but oracle will handle
     function liquidate(uint256 tokenId, uint256 value) external override {
         // swap with offers or list on exchanges
     }
 
-    // liquidate all NFTs
+    // liquidate all NFTs in collection
     function liquidateAll() external override {
         // swap with offers or list on exchanges
     }
 
     // "borrow" funds to purchase NFTs
-    function borrow(uint256 tokenId) external payable override {
+    /* 
+    assetData {
+        uint256 tokenId
+        uint256 price
+        Marketplace marketplace
+    }
+    */
+
+    /* 
+    purchaseData {
+        makerAsk
+    }
+    */
+    function borrow(bytes calldata assetData, bytes calldata purchaseData)
+        external
+        payable
+        override
+    {
+        BorrowAssetType memory _assetData = abi.decode(
+            assetData,
+            (BorrowAssetType)
+        );
         /* 
-         retrieve tokenId price
+        retrieve tokenId price
         check to see if there is enough eth in the pool
         check to see if token price of collection - message value is within coverage range of pool
         create loan
-        purchase token from opensea - aggregate later
+        purchase token from marketplace
         assign mapping
-         */
+        */
 
-        require(
+        if (
+            positions[_assetData.tokenId].active ||
+            positions[_assetData.tokenId].principal > 0
+        ) {
+            revert Error_ExistingLoan();
+        }
+
+        if (address(this).balance - msg.value < minLiquidity) {
+            revert Error_InsufficientLiquidity();
+        }
+
+        /* require(
             positions[tokenId].active == false &&
                 positions[tokenId].principal == 0,
             "LeverV1Pool: existant loan"
-        );
-        require(
+        ); */
+        /* require(
             address(this).balance - msg.value >= minLiquidity,
             "LeverV1Pool: pool funds too low"
-        ); // balance below min liquidity
+        ); */
+        // balance below min liquidity
 
         // retrieving token price
-        (bool listingPriceSuccess, bytes memory listingPriceData) = marketplace
+        uint256 listingPrice = _assetData.price;
+        /* (bool listingPriceSuccess, bytes memory listingPriceData) = marketplace
             .staticcall(
                 abi.encodeWithSelector(
                     IMarketplace.getListing.selector,
-                    tokenId
+                    _assetData.tokenId
                 )
             );
         uint256 listingPrice = abi.decode(listingPriceData, (uint256));
 
+        if (!listingPriceSuccess) {
+            revert Error_NotSuccessful();
+        } */
+
         // test
-        require(
+        if ((msg.value * 1 ether) / listingPrice < collateralCoverageRatio) {
+            revert Error_InsufficientContribution();
+        }
+        /* require(
             (msg.value * 1 ether) / listingPrice > collateralCoverageRatio,
             "LeverV1Pool: Max coverage exceeded"
-        ); // pool required to input more than max coverage
+        ); */
+        // pool required to input more than max coverage
 
-        // purchase
+        /* // purchase
         (bool purchaseSuccess, bytes memory purchaseData) = marketplace.call{
             value: listingPrice
         }(abi.encodeWithSelector(IMarketplace.purchase.selector, tokenId));
-        require(purchaseSuccess, "LeverV1Pool: purchase failed");
+        //require(purchaseSuccess, "LeverV1Pool: purchase failed");
+
+        if (!purchaseSuccess) {
+            revert Error_NotSuccessful();
+        } */
+
+        // call PurchaseAgent
+        // decode asset data
+        /*purchase{value: _assetData.price}(
+            _assetData.marketplace,
+            purchaseData
+        );*/
 
         // if success mint fake
-        if (purchaseSuccess) {
-            LeverV1ERC721L WrappedCollection = LeverV1ERC721L(
-                wrappedCollection
-            );
+        //if (purchaseSuccess) {
 
-            positions[tokenId] = Loan(
-                block.timestamp,
-                listingPrice - msg.value,
-                msg.sender,
-                block.timestamp,
-                block.timestamp + loanTerm,
-                loanTerm,
-                0,
-                true
-            );
+        positions[_assetData.tokenId] = Loan(
+            block.timestamp,
+            listingPrice - msg.value,
+            msg.sender,
+            block.timestamp,
+            block.timestamp + loanTerm,
+            loanTerm,
+            0,
+            true
+        );
 
-            WrappedCollection.mint(msg.sender, tokenId);
+        LeverV1ERC721L(wrappedCollection).mint(msg.sender, _assetData.tokenId);
 
-            emit Borrow(msg.sender, msg.value, tokenId);
-        } else {
+        emit Borrow(msg.sender, msg.value, _assetData.tokenId);
+        /* } else {
             revert("LeverV1Pool: nft purchase failed");
-        }
+        } */
     }
 
     // borrowers pay back loan. If loan payment is complete, transfer NFT ownership
@@ -322,10 +432,6 @@ contract LeverV1Pool is ILeverV1Pool {
         } else {
             _loan.principal = _loan.principal - msg.value;
         }
-
-        //if (timeDifference >= compoundInterval) {
-        _loan.lastCompound = block.timestamp;
-        //}
 
         positions[tokenId] = _loan;
 
@@ -380,7 +486,10 @@ contract LeverV1Pool is ILeverV1Pool {
         (bool sellSuccess, bytes memory sellData) = marketplace.call(
             abi.encodeWithSelector(IMarketplace.sell.selector, tokenId, value)
         );
-        require(sellSuccess, "LeverV1Pool: sale failed");
+        if (!sellSuccess) {
+            revert Error_NotSuccessful();
+        }
+        //require(sellSuccess, "LeverV1Pool: sale failed");
 
         return sellSuccess;
     }
