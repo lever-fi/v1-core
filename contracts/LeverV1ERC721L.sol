@@ -10,16 +10,24 @@ contract LeverV1ERC721L is ERC721 {
 
     event Burn(uint256 tokenId);
 
-    modifier onlyOwner {
+    modifier onlyOwner() {
         require(msg.sender == pool, "LeverV1ERC721L: not owner");
         _;
     }
 
-    constructor(string memory name, string memory symbol, address _pool) ERC721(name, symbol) {
+    constructor(
+        string memory name,
+        string memory symbol,
+        address _pool
+    ) ERC721(name, symbol) {
         pool = _pool;
     }
 
-    function mint(address account, uint256 tokenId) onlyOwner public returns (bool) {
+    function mint(address account, uint256 tokenId)
+        public
+        onlyOwner
+        returns (bool)
+    {
         _mint(account, tokenId);
 
         emit Mint(account, tokenId);
@@ -27,20 +35,26 @@ contract LeverV1ERC721L is ERC721 {
         return true;
     }
 
-    function burn(uint256 tokenId) onlyOwner public returns (bool) {
+    function burn(uint256 tokenId) public onlyOwner returns (bool) {
         _burn(tokenId);
-        
+
         emit Burn(tokenId);
 
         return true;
     }
 
+    function _transfer(
+        address from,
+        address to,
+        uint256 tokenId
+    ) internal virtual override {}
+
     function transferFrom(
-        address from, 
-        address to, 
+        address from,
+        address to,
         uint256 tokenId
     ) public virtual override {}
-    
+
     function safeTransferFrom(
         address from,
         address to,
