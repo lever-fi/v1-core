@@ -6,6 +6,7 @@ import {IExecutionStrategy} from "./integrations/LooksRare/interfaces/IExecution
 import {LooksRareOrderTypes} from "./integrations/LooksRare/libraries/LooksRareOrderTypes.sol";
 
 import {IOpenSeaExchange} from "./integrations/OpenSea/interfaces/IOpenSeaExchange.sol";
+import {OpenSeaOrderTypes} from "./integrations/OpenSea/libraries/OpenSeaOrderTypes.sol";
 
 import {IPurchaseAgent} from "./interfaces/IPurchaseAgent.sol";
 
@@ -14,6 +15,7 @@ import "hardhat/console.sol";
 contract PurchaseAgent is IPurchaseAgent {
     using LooksRareOrderTypes for LooksRareOrderTypes.MakerOrder;
     using LooksRareOrderTypes for LooksRareOrderTypes.TakerOrder;
+    using OpenSeaOrderTypes for OpenSeaOrderTypes.BasicOrderParameters;
 
     address public constant OPENSEA_EXCHANGE =
         0x00000000006c3852cbEf3e08E8dF289169EdE581; //0x7f268357A8c2552623316e2562D90e642bB538E5;
@@ -44,14 +46,13 @@ contract PurchaseAgent is IPurchaseAgent {
         // 205-210
     }
 
-    function openseaPurchase(Order memory order, bytes32 fulfillerConduitKey)
-        private
-        returns (bool)
-    {
-        bool fulfilled = IOpenSeaExchange(OPENSEA_EXCHANGE).fulfillOrder{value: }(
-            order,
-            fulfillerConduitKey
-        );
+    function openseaPurchase(
+        OpenSeaOrderTypes.BasicOrderParameters memory parameters,
+        uint256 price
+    ) private returns (bool) {
+        bool fulfilled = IOpenSeaExchange(OPENSEA_EXCHANGE).fulfillBasicOrder{
+            value: price
+        }(parameters);
 
         return fulfilled;
     }
@@ -62,12 +63,15 @@ contract PurchaseAgent is IPurchaseAgent {
         override
     {
         if (marketplace == Marketplace.OPENSEA) {
-            (Order memory order, bytes32 fulfillerConduitKey) = abi.decode(
-                _data,
-                (Order, bytes32)
-            );
+            (
+                OpenSeaOrderTypes.BasicOrderParameters memory parameters,
+                uint256 price
+            ) = abi.decode(
+                    _data,
+                    (OpenSeaOrderTypes.BasicOrderParameters, uint256)
+                );
 
-            bool _success = openseaPurchase(_data);
+            bool _success = openseaPurchase(parameters, price);
         } else if (marketplace == Marketplace.LOOKSRARE) {
             LooksRareOrderTypes.MakerOrder memory makerAsk = abi.decode(
                 _data,

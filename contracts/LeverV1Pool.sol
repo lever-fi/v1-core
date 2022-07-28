@@ -9,6 +9,7 @@ import {LeverV1ERC20Essential} from "./LeverV1ERC20Essential.sol";
 import {LeverV1ERC721L} from "./LeverV1ERC721L.sol";
 
 import {IPurchaseAgent} from "./interfaces/IPurchaseAgent.sol";
+import {PurchaseAgent} from "./PurchaseAgent.sol";
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
@@ -20,6 +21,12 @@ import "hardhat/console.sol";
 // reentrancy guard
 // ownable
 // update rate functions
+
+// OriginalCollection setApproval
+// WETH setApproval
+
+// retrace position management
+// fix compounding
 contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
     /*
         [holdings] how much ETH has a certain address contributed
@@ -62,6 +69,8 @@ contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
     uint256 public minLiquidity;
     uint256 public minDeposit;
     uint256 public riskIndex;
+
+    string symbol;
 
     struct Loan {
         // hash for loan
@@ -119,18 +128,22 @@ contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
         treasury = address(0);
 
         IERC721Minimal OriginalCollection = IERC721Minimal(_originalCollection);
+        symbol = string(
+            abi.encodePacked(OriginalCollection.symbol(), "-LFI-LPP")
+        );
         string memory tokenName = string(
-            abi.encodePacked(OriginalCollection.name(), "-LP-LFI")
+            abi.encodePacked(OriginalCollection.symbol(), "-LFI-LPT")
         );
         string memory nftCollectionName = string(
-            abi.encodePacked(tokenName, "-NFT")
+            abi.encodePacked(OriginalCollection.symbol(), "-LFI-LPW")
         );
 
         wrappedCollection = address(
             new LeverV1ERC721L(
                 nftCollectionName,
                 nftCollectionName,
-                address(this)
+                address(this),
+                _originalCollection
             )
         );
         poolToken = address(
@@ -150,6 +163,7 @@ contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
     }
 
     // deposit funds into pool and get lp tokens in return
+    // reentrancy gaurd
     function deposit() external payable override {
         if (msg.value < minDeposit) {
             revert Error_InsufficientBalance();
@@ -235,9 +249,23 @@ contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
 
     // chainlink keeper function
     function compound() external override {
-        uint256[] _newActivePositions = [];
+        uint256 positionIndex = 0;
 
-        for (
+        while (positionIndex < activePositions.length) {
+            uint256 position = activePositions[positionIndex];
+            if (positions[position].expirationTimestamp < block.timestamp) {
+                delete activePositions[positionIndex];
+                // autoliquidiate
+            } else {
+                positions[position].lastCompound = block.timestamp;
+                positions[position].principal +=
+                    (positions[position].principal * 1 ether * interestRate) /
+                    1 ether;
+                positionIndex += 1;
+            }
+        }
+
+        /* for (
             uint256 positionIndex = 0;
             positionIndex < activePositions.length;
             positionIndex++
@@ -255,7 +283,7 @@ contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
                 1 ether;
         }
 
-        activePositions = _newActivePositions;
+        activePositions = _newActivePositions; */
     }
 
     // liquidate current position - mindful of gas but oracle will handle
@@ -307,7 +335,11 @@ contract LeverV1Pool is ILeverV1Pool, PurchaseAgent, ERC721Holder {
             revert Error_ExistingLoan();
         }
 
-        if (address(this).balance - msg.value < minLiquidity) {
+        // modify to include asset price
+        if (
+            address(this).balance - _assetData.price < /* msg.value */
+            minLiquidity
+        ) {
             revert Error_InsufficientLiquidity();
         }
 
