@@ -86,6 +86,7 @@ contract LeverV1Pool is
 
     string symbol;
     uint256 lastCharge;
+    uint256 public truePoolValue;
 
     modifier onlyDeployer() {
         require(msg.sender == deployer, "LeverV1Pool: Sender not Deployer");
@@ -191,11 +192,12 @@ contract LeverV1Pool is
             revert Error_NotSuccessful();
         }
 
+        truePoolValue += msg.value;
         emit Deposit(msg.sender, msg.value);
     }
 
     function collect(uint256 amountRequested) external override nonReentrant {
-        uint256 poolValue = address(this).balance;
+        uint256 poolValue = truePoolValue; //address(this).balance;
 
         IERC20Minimal PoolToken = IERC20Minimal(poolToken);
         uint256 userBalance = PoolToken.balanceOf(msg.sender);
@@ -214,11 +216,11 @@ contract LeverV1Pool is
             revert Error_NotSuccessful();
         }
 
-        if (poolValue <= owedBalance) {
-            // add to queue
+        if (address(this).balance <= owedBalance) {
+            //if (poolValue <= owedBalance) {
+            // add to queue, transfer possible balance, and add throw
             revert Error_InsufficientLiquidity();
         }
-
         (bool sent, bytes memory data) = payable(msg.sender).call{
             value: owedBalance
         }(""); //.transfer(owedBalance);
@@ -227,6 +229,7 @@ contract LeverV1Pool is
             revert Error_NotSuccessful();
         }
 
+        truePoolValue -= owedBalance;
         emit Collect(msg.sender, owedBalance);
     }
 
@@ -336,9 +339,11 @@ contract LeverV1Pool is
 
         // if msg.value is not sufficient enough to cover interest payment
         if (_msgValue < _interestPayment) {
+            truePoolValue += _msgValue;
             _loan.interest -= _msgValue; // subtract interest from msg value
             // else just set interest to 0 and subtract from msg value
         } else {
+            truePoolValue += _loan.interest;
             _loan.interest = 0;
             _msgValue -= _interestPayment;
 

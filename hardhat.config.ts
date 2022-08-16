@@ -57,11 +57,11 @@ const config: HardhatUserConfig = {
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
     kovan: {
-      url: "https://kovan.infura.io/v3/be138a5fe1e04bc6bf7c8c0eedbf0b71",
+      url: `https://kovan.infura.io/v3/${process.env.INFURA_KEY}`,
       accounts: [`${process.env.PRIVATE_KEY}`],
     },
     rinkeby: {
-      url: "https://eth-rinkeby.alchemyapi.io/v2/m7ztgybHHIKMMEX6bOnYrXpGN9NDAqwq",
+      url: `https://eth-rinkeby.alchemyapi.io/v2/${process.env.ALCHEMY_KEY}`,
       accounts: [`${process.env.PRIVATE_KEY}`],
     },
   },
