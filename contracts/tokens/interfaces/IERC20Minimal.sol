@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.13;
 
-interface IERC20Essential {
+interface IERC20Minimal {
+    function name() external view returns (string memory);
+
+    function symbol() external view returns (string memory);
+
     function totalSupply() external view returns (uint256);
 
     function balanceOf(address account) external view returns (uint256);

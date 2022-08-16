@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.13;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
-contract LeverV1ERC721L is ERC721 {
+// Lever V1 Lever Pool Sythetic
+contract LeverV1LPS is ERC721 {
     address public pool;
     address public original;
 
@@ -13,7 +14,7 @@ contract LeverV1ERC721L is ERC721 {
     event Burn(uint256 tokenId);
 
     modifier onlyOwner() {
-        require(msg.sender == pool, "LeverV1ERC721L: not owner");
+        require(msg.sender == pool, "LeverV1LPW: not owner");
         _;
     }
 

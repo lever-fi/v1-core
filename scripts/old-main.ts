@@ -7,15 +7,18 @@ async function main() {
   await nftCollection.deployed();
 
   // deploy marketplace
-  const Marketplace = await ethers.getContractFactory("Marketplace");
+  /* const Marketplace = await ethers.getContractFactory("Marketplace");
   const marketplace = await Marketplace.deploy(nftCollection.address);
-  await marketplace.deployed();
+  await marketplace.deployed(); */
 
   // mint nfts
-  const mintTxn = await nftCollection.mint(marketplace.address, 10);
+  const mintTxn = await nftCollection.mint(
+    "0x09b1769771a78D147CaFc5cCC971a94bDA5C342a",
+    50
+  );
   await mintTxn.wait();
 
-  const LeverV1Pool = await ethers.getContractFactory("LeverV1Pool");
+  /* const LeverV1Pool = await ethers.getContractFactory("LeverV1Pool");
   const leverV1Pool = await LeverV1Pool.deploy(
     "0x0000000000000000000000000000000000000000", // factory
     marketplace.address, // temp - marketplace
@@ -29,11 +32,11 @@ async function main() {
     ethers.utils.parseEther("30"), // min liquidity ✔️
     ethers.utils.parseEther("5").div(1e2) // min deposit (0.05 ETH) ✔️
   );
-  await leverV1Pool.deployed();
+  await leverV1Pool.deployed(); */
 
   console.log(nftCollection.address);
-  console.log(marketplace.address);
-  console.log(leverV1Pool.address);
+  //console.log(marketplace.address);
+  //console.log(leverV1Pool.address);
 }
 
 // We recommend this pattern to be able to use async/await everywhere

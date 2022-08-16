@@ -1,25 +1,23 @@
-// We require the Hardhat Runtime Environment explicitly here. This is optional
-// but useful for running the script in a standalone fashion through `node <script>`.
-//
-// When running the script with `npx hardhat run <script>` you'll find the Hardhat
-// Runtime Environment's members available in the global scope.
 import { ethers } from "hardhat";
 
 async function main() {
-  // Hardhat always runs the compile task when running scripts with its command
-  // line interface.
-  //
-  // If this script is run directly using `node` you may want to call compile
-  // manually to make sure everything is compiled
-  // await hre.run('compile');
+  const LeverV1Pool = await ethers.getContractFactory("LeverV1Pool");
+  const leverV1Pool = await LeverV1Pool.deploy(
+    "0x0000000000000000000000000000000000000000", // factory
+    marketplace.address, // temp - marketplace
+    "0x0000000000000000000000000000000000000000", // oracle
+    nftCollection.address, // collection ✔️
+    ethers.utils.parseEther("40").div(1e2), // collateral coverage ratio (40%)
+    ethers.utils.parseEther("14").div(1e3), // interest rate (1.4%)
+    ethers.BigNumber.from(60 * 60 * 24), // compound daily
+    ethers.utils.parseEther("15").div(1e2), // burn rate (15%)
+    0, // loan term
+    ethers.utils.parseEther("30"), // min liquidity ✔️
+    ethers.utils.parseEther("5").div(1e2) // min deposit (0.05 ETH) ✔️
+  );
+  await leverV1Pool.deployed();
 
-  // We get the contract to deploy
-  const Greeter = await ethers.getContractFactory("Greeter");
-  const greeter = await Greeter.deploy("Hello, Hardhat!");
-
-  await greeter.deployed();
-
-  console.log("Greeter deployed to:", greeter.address);
+  console.log(leverV1Pool.address);
 }
 
 // We recommend this pattern to be able to use async/await everywhere

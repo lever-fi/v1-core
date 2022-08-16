@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.13;
 
 interface ILeverV1Pool {
     error Error_NotSuccessful();
@@ -32,7 +32,9 @@ interface ILeverV1Pool {
 
     function quickSell(uint256 tokenId, uint256 value) external;
 
-    function compound() external;
+    //function compound() external;
+
+    function chargeInterest() external;
 
     function liquidate(uint256 tokenId, uint256 value) external;
 

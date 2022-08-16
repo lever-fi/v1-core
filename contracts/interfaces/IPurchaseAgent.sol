@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.13;
+
+enum Marketplace {
+    OPENSEA,
+    LOOKSRARE
+}
 
 interface IPurchaseAgent {
-    enum Marketplace {
-        OPENSEA,
-        LOOKSRARE
-    }
-
-    function purchase(Marketplace marketplace, bytes calldata _data)
-        external
-        payable;
+    /* function purchase(Marketplace marketplace, bytes calldata _data)
+        public
+        payable; */
 }
