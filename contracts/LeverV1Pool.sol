@@ -134,13 +134,13 @@ contract LeverV1Pool is
 
         IERC721Minimal OriginalCollection = IERC721Minimal(_originalCollection);
         symbol = string(
-            abi.encodePacked(OriginalCollection.symbol(), "-LFI-LPP")
+            abi.encodePacked(OriginalCollection.symbol(), "_LFI_LPP")
         );
         string memory tokenName = string(
-            abi.encodePacked(OriginalCollection.symbol(), "-LFI-LPT")
+            abi.encodePacked(OriginalCollection.symbol(), "_LFI_LPT")
         );
         string memory nftCollectionName = string(
-            abi.encodePacked(OriginalCollection.symbol(), "-LFI-LPS")
+            abi.encodePacked(OriginalCollection.symbol(), "_LFI_LPS")
         );
 
         syntheticCollection = address(
@@ -210,17 +210,18 @@ contract LeverV1Pool is
         uint256 owedBalance = (((amountRequested * 1 ether) / totalSupply) *
             poolValue) / 1 ether;
 
+        if (address(this).balance < owedBalance) {
+            //if (poolValue <= owedBalance) {
+            // add to queue, transfer possible balance, and add throw
+            revert Error_InsufficientLiquidity();
+        }
+
         bool success = PoolToken.burnFrom(msg.sender, amountRequested);
 
         if (!success) {
             revert Error_NotSuccessful();
         }
 
-        if (address(this).balance <= owedBalance) {
-            //if (poolValue <= owedBalance) {
-            // add to queue, transfer possible balance, and add throw
-            revert Error_InsufficientLiquidity();
-        }
         (bool sent, bytes memory data) = payable(msg.sender).call{
             value: owedBalance
         }(""); //.transfer(owedBalance);
