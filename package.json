@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "t": "hardhat test",
+    "t-old": "hardhat test",
+    "t": "forge test --fork-url=$MAINNET_RPC_URL -vvvv",
     "load": "source .env",
     "f": "prettier --write 'contracts/**/*.sol && prettier --write 'test/**/*.sol'"
   },
