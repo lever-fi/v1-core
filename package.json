@@ -1,7 +1,8 @@
 {
   "scripts": {
-    "t": "npx hardhat test",
-    "load": "source .env"
+    "t": "hardhat test",
+    "load": "source .env",
+    "f": "prettier --write 'contracts/**/*.sol && prettier --write 'test/**/*.sol'"
   },
   "dependencies": {
     "@chainlink/contracts": "^0.4.1",
