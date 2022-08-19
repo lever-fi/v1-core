@@ -1,4 +1,4 @@
-[default]
+[profile.default]
 solc = '0.8.14'
 via_ir = true
 src = 'contracts'
@@ -18,14 +18,14 @@ fuzz_runs = 5000
 fuzz_maximum_global_rejects = 2_000_000
 optimizer_runs = 19_066
 
-[optimized]
+[profile.optimized]
 out = 'optimized-out'
 
-[test]
+[profile.test]
 via_ir = false
 src = 'test/foundry'
 
-[lite]
+[profile.lite]
 out = 'optimized-out'
 via_ir = false
 fuzz_runs = 1000
