@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "t": "npx hardhat test"
+    "t": "npx hardhat test",
+    "load": "source .env"
   },
   "dependencies": {
     "@chainlink/contracts": "^0.4.1",
