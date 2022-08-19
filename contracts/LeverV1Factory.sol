@@ -80,7 +80,7 @@ contract LeverV1Factory {
     owner = newOwner;
   }
 
-  function poolExists(address collection) external returns (bool) {
+  function poolExists(address collection) external view returns (bool) {
     return _poolRegistry[collection];
   }
 }
