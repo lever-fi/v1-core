@@ -2,9 +2,6 @@ name: Lever Core Test CI
 
 on: [push, pull_request]
 
-env:
-  FOUNDRY_PROFILE: ci
-
 concurrency:
   group: ${{github.workflow}}-${{github.ref}}
   cancel-in-progress: true
@@ -16,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [16.x]s
+        node-version: [16.x]
 
     steps:
       - uses: actions/checkout@v3
