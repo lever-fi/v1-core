@@ -15,13 +15,13 @@ import {
   IOpenSeaExchange
 } from "./integrations/OpenSea/interfaces/IOpenSeaExchange.sol";
 
-import "hardhat/console.sol";
-
 contract LiquidateAgent {
+  //0x7f268357A8c2552623316e2562D90e642bB538E5;
   address public constant OPENSEA_EXCHANGE =
-    0x00000000006c3852cbEf3e08E8dF289169EdE581; //0x7f268357A8c2552623316e2562D90e642bB538E5;
+    0x00000000006c3852cbEf3e08E8dF289169EdE581;
+  //0x59728544B08AB483533076417FbBB2fD0B17CE3a;
   address public constant LOOKSRARE_EXCHANGE =
-    0x1AA777972073Ff66DCFDeD85749bDD555C0665dA; //0x59728544B08AB483533076417FbBB2fD0B17CE3a;
+    0x1AA777972073Ff66DCFDeD85749bDD555C0665dA;
 
   function looksrareLiquidate() private {}
 

@@ -4,8 +4,6 @@ pragma solidity ^0.8.13;
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-import "hardhat/console.sol";
-
 contract Marketplace {
   mapping(uint256 => uint256) public listings;
   address public immutable collection;
