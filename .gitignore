@@ -3,10 +3,27 @@ node_modules
 coverage
 coverage.json
 typechain
+typechain-types
+yarn-error.log
 
 src/types
 secret.json
 
 #Hardhat files
+artifacts/
+artifacts-ref/
+hh-cache/
+hh-cache-ref/
+
+#foundry test compilation files
 cache
-artifacts
+out
+reference-out
+optimized-out
+reference-working
+
+.DS_Store
+
+# VScode
+.vscode
+__pycache__
