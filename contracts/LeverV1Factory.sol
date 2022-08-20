@@ -5,6 +5,9 @@ import { LeverV1Pool } from "./LeverV1Pool.sol";
 
 /// @notice Deploys and manages Lever V1 pools
 contract LeverV1Factory {
+  error DuplicatePool();
+  error Unauthorized();
+
   mapping(address => bool) private _poolRegistry;
   address public owner;
   event DeployPool(
@@ -25,7 +28,10 @@ contract LeverV1Factory {
   }
 
   modifier onlyOwner() {
-    require(msg.sender == owner, "LeverV1Factory: Sender is not owner");
+    if (msg.sender != owner) {
+      revert Unauthorized();
+    }
+    //require(msg.sender == owner, "LeverV1Factory: Sender is not owner");
     _;
   }
 
@@ -40,10 +46,10 @@ contract LeverV1Factory {
     uint256 minDeposit,
     uint256 paymentFrequency
   ) external onlyOwner returns (address pool) {
-    require(
-      _poolRegistry[originalCollection] == false,
-      "PoolFactory: Pool is already registered"
-    );
+    if (_poolRegistry[originalCollection]) {
+      revert DuplicatePool();
+    }
+
     _poolRegistry[originalCollection] = true;
 
     pool = address(
