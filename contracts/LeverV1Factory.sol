@@ -8,7 +8,10 @@ contract LeverV1Factory {
   error DuplicatePool();
   error Unauthorized();
 
+  mapping(address => bool) private _collectionRegistry;
   mapping(address => bool) private _poolRegistry;
+  mapping(address => address) private _collectionPoolTable;
+
   address public owner;
   event DeployPool(
     address indexed pool,
@@ -31,7 +34,6 @@ contract LeverV1Factory {
     if (msg.sender != owner) {
       revert Unauthorized();
     }
-    //require(msg.sender == owner, "LeverV1Factory: Sender is not owner");
     _;
   }
 
@@ -46,11 +48,11 @@ contract LeverV1Factory {
     uint256 minDeposit,
     uint256 paymentFrequency
   ) external onlyOwner returns (address pool) {
-    if (_poolRegistry[originalCollection]) {
+    if (_collectionRegistry[originalCollection]) {
       revert DuplicatePool();
     }
 
-    _poolRegistry[originalCollection] = true;
+    _collectionRegistry[originalCollection] = true;
 
     pool = address(
       new LeverV1Pool(
@@ -67,6 +69,9 @@ contract LeverV1Factory {
         msg.sender
       )
     );
+
+    _poolRegistry[pool] = true;
+    _collectionPoolTable[originalCollection] = pool;
 
     emit DeployPool(
       pool,
@@ -86,7 +91,11 @@ contract LeverV1Factory {
     owner = newOwner;
   }
 
-  function poolExists(address collection) external view returns (bool) {
-    return _poolRegistry[collection];
+  function collectionExists(address collection) external view returns (bool) {
+    return _collectionRegistry[collection];
+  }
+
+  function isValidPool(address pool) external view returns (bool) {
+    return _poolRegistry[pool];
   }
 }

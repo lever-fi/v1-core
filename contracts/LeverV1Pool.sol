@@ -88,6 +88,8 @@ contract LeverV1Pool is
   uint256 lastCharge;
   uint256 public truePoolValue;
 
+  event Unsuccessful(bytes data);
+
   modifier onlyDeployer() {
     require(msg.sender == deployer, "LeverV1Pool: Sender not Deployer");
     _;
@@ -223,6 +225,7 @@ contract LeverV1Pool is
     }(""); //.transfer(owedBalance);
 
     if (!sent) {
+      emit Unsuccessful(data);
       revert Error_NotSuccessful();
     }
 
@@ -256,7 +259,10 @@ contract LeverV1Pool is
       revert Error_ExistingLoan();
     }
 
-    if (address(this).balance + msg.value - _assetData.price < minLiquidity) {
+    if (
+      _assetData.price >= address(this).balance + msg.value ||
+      address(this).balance + msg.value - _assetData.price < minLiquidity
+    ) {
       revert Error_InsufficientLiquidity();
     }
 
@@ -269,6 +275,10 @@ contract LeverV1Pool is
 
     // call PurchaseAgent
     bool purchaseSuccess = purchase(_assetData.marketplace, purchaseData);
+
+    if (!purchaseSuccess) {
+      revert Error_NotSuccessful();
+    }
 
     // if purchase success
     LeverV1LPS(syntheticCollection).mint(msg.sender, _assetData.tokenId);
@@ -296,7 +306,7 @@ contract LeverV1Pool is
     for (uint256 i = 0; i < _loan.installmentsRemaining; i++) {
       _loan.installments.push(
         Installment(
-          principal / _loan.installmentsRemaining,
+          principal / installmentCount,
           block.timestamp + ((i + 1) * _loan.paymentFrequency)
         )
       );
@@ -311,20 +321,38 @@ contract LeverV1Pool is
   function repay(
     uint256 tokenId /* bytes memory loanHash */
   ) external payable override nonReentrant {
-    require(msg.value > 0, "LeverV1Pool: can't repay nothing");
     Loan storage _loan = positions[tokenId];
-    require(_loan.active == true, "LeverV1Pool: inactive");
-    require(_loan.principal > 0, "LeverV1Pool: no principal");
-    require(
-      _loan.expirationTimestamp <= block.timestamp,
-      "LeverV1Pool: loan expired"
-    );
-    require(_loan.borrower == msg.sender, "LeverV1Pool: Mismatched borrowers");
-
     uint256 timeDifference = block.timestamp - _loan.lastCharge;
     uint256 _msgValue = msg.value;
 
-    require(timeDifference > paymentFrequency, "LeverV1Pool: times up");
+    require(_msgValue > 0, "LeverV1Pool: can't repay nothing");
+    if (_msgValue == 0) {
+      //
+    }
+    require(_loan.active == true, "LeverV1Pool: inactive");
+    if (_loan.active == false) {
+      //
+    }
+    require(_loan.principal > 0, "LeverV1Pool: no principal");
+    if (_loan.principal == 0) {
+      //
+    }
+    require(
+      block.timestamp <= _loan.expirationTimestamp,
+      "LeverV1Pool: loan expired"
+    );
+    if (block.timestamp > _loan.expirationTimestamp) {
+      //
+    }
+    require(_loan.borrower == msg.sender, "LeverV1Pool: Mismatched borrowers");
+    if (_loan.borrower != msg.sender) {
+      //
+    }
+
+    require(timeDifference < paymentFrequency, "LeverV1Pool: times up");
+    if (timeDifference > paymentFrequency) {
+      //
+    }
     uint256 _interestPayment = _loan.interest;
     uint256 _principalPayment = _loan.principal;
     //uint256 amountToRepay = _interestPayment + _principalPayment; //getRepaymentAmount(_loan);
@@ -355,6 +383,7 @@ contract LeverV1Pool is
           break;
         } else {
           _msgValue -= _loan.installments[_firstIndex].amount;
+          _loan.installmentsRemaining -= 1;
           delete _loan.installments[_firstIndex];
         }
 

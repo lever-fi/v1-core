@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
 // Lever V1 Lever Pool Sythetic
-contract LeverV1LPS is ERC721 {
+contract LeverV1LPS is ERC721Enumerable {
   address public pool;
   address public original;
 
@@ -77,12 +78,12 @@ contract LeverV1LPS is ERC721 {
     address from,
     address to,
     uint256 tokenId
-  ) public virtual override {}
+  ) public virtual override(ERC721, IERC721) {}
 
   function safeTransferFrom(
     address from,
     address to,
     uint256 tokenId,
     bytes memory data
-  ) public virtual override {}
+  ) public virtual override(ERC721, IERC721) {}
 }

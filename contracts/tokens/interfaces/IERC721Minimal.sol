@@ -10,6 +10,8 @@ interface IERC721Minimal {
 
   function ownerOf(uint256 tokenId) external view returns (address owner);
 
+  function totalSupply() external view returns (uint256);
+
   function transferFrom(
     address from,
     address to,
