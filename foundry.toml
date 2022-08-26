@@ -14,9 +14,10 @@ remappings = [
     'murky/=lib/murky/src/',
     '@openzeppelin/=lib/openzeppelin-contracts/',
 ]
-fuzz_runs = 5000
+fuzz_runs = 5_000
 fuzz_maximum_global_rejects = 2_000_000
 optimizer_runs = 19_066
+gas_reports = ["LeverV1Factory", "LeverV1Pool"]
 
 [profile.optimized]
 out = 'optimized-out'

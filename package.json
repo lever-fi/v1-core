@@ -3,7 +3,8 @@
     "t": "hardhat test",
     "inject": "source .env",
     "format": "prettier --write 'contracts/**/*.sol' && prettier --write 'test/**/*.sol'",
-    "test": "source .env && forge test --fork-url=$MAINNET_RPC_URL -vvvv"
+    "test-v": "source .env && forge test --fork-url=$MAINNET_RPC_URL -vvvv",
+    "test": "source .env && forge test --fork-url=$MAINNET_RPC_URL -vv"
   },
   "dependencies": {
     "@chainlink/contracts": "^0.4.1",

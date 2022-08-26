@@ -1,0 +1,8 @@
+LeverV1PoolTest:testAssetLiquidation() (gas: 163)
+LeverV1PoolTest:testDeployDuplicatePool() (gas: 13214)
+LeverV1PoolTest:testDeployNewPool() (gas: 4420295)
+LeverV1PoolTest:testDeployPoolAsNotOwner() (gas: 11375)
+LeverV1PoolTest:testExtraLoanRepayment() (gas: 207)
+LeverV1PoolTest:testLoanOrigination() (gas: 207)
+LeverV1PoolTest:testLoanOriginationOnInvalidAsset() (gas: 164)
+LeverV1PoolTest:testLoanRepayment() (gas: 207)

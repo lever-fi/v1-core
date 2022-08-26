@@ -25,5 +25,4 @@ reference-working
 .DS_Store
 
 # VScode
-.vscode
 __pycache__
