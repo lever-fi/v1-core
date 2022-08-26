@@ -50,3 +50,4 @@ For faster runs of your tests and scripts, consider skipping ts-node's type chec
 Lock purchase agent to pools only
 
 - delegatecall for purchase agent txn (pa = proxy, not inheritable contract)
+  Asset manager agent: buy, list, sell, transfer, etc. (valut, receiver, fake signature, etc.)
