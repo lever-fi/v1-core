@@ -490,6 +490,13 @@ contract LeverV1Pool is
     return positions[tokenId];
   }
 
+  function getEthToToken(uint256 ethAmount) public pure returns (uint256) {}
+  
+  function getPredictedToken(uint256 ethAmount) public pure returns (uint256) {}
+
+  function getTokenToEth(uint256 tokenAmount) public pure returns (uint256) {}
+
+
   // liquidate current position - mindful of gas but oracle will handle
   function liquidate(uint256 tokenId, uint256 value) external override {
     // swap with offers or list on exchanges
