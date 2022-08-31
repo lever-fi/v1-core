@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+//import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@rari-capital/solmate/src/tokens/ERC721.sol";
 
 // Lever V1 Lever Pool Sythetic
-contract LeverV1LPS is ERC721Enumerable {
+contract LeverV1ERC721 is ERC721 {
   address public pool;
   address public original;
 
@@ -15,7 +14,7 @@ contract LeverV1LPS is ERC721Enumerable {
   event Burn(uint256 tokenId);
 
   modifier onlyOwner() {
-    require(msg.sender == pool, "LeverV1LPW: not owner");
+    require(msg.sender == pool, "LeverV1LPS: not owner");
     _;
   }
 
@@ -60,30 +59,22 @@ contract LeverV1LPS is ERC721Enumerable {
     return ERC721(original).tokenURI(tokenId);
   }
 
-  // empty
-  function _transfer(
-    address from,
-    address to,
-    uint256 tokenId
-  ) internal virtual override {}
-
-  function _safeTransfer(
-    address from,
-    address to,
-    uint256 tokenId,
-    bytes memory _data
-  ) internal virtual override {}
-
   function transferFrom(
     address from,
     address to,
-    uint256 tokenId
-  ) public virtual override(ERC721, IERC721) {}
+    uint256 id
+  ) public virtual override {}
 
   function safeTransferFrom(
     address from,
     address to,
-    uint256 tokenId,
+    uint256 id
+  ) public virtual override {}
+
+  function safeTransferFrom(
+    address from,
+    address to,
+    uint256 id,
     bytes memory data
-  ) public virtual override(ERC721, IERC721) {}
+  ) public virtual override {}
 }

@@ -2,7 +2,7 @@
   "scripts": {
     "t": "hardhat test",
     "inject": "source .env",
-    "format": "prettier --write 'contracts/**/*.sol' && prettier --write 'test/**/*.sol'",
+    "prettier": "prettier --write 'contracts/**/*.sol' && prettier --write 'test/**/*.sol'",
     "test-v": "source .env && forge test --fork-url=$MAINNET_RPC_URL -vvvv",
     "test": "source .env && forge test --fork-url=$MAINNET_RPC_URL -vv"
   },
@@ -43,6 +43,11 @@
     "ts-node": "^10.1.0",
     "typechain": "^8.0.0",
     "typescript": "^4.5.2"
+  },
+  "lint": {
+    "*.sol": "prettier --write 'contracts/**/*.sol' && prettier --write 'test/**/*.sol'",
+    "*.js": "prettier --write",
+    "*.ts": "prettier --write"
   },
   "lint-staged": {
     "*.sol": "prettier --write",

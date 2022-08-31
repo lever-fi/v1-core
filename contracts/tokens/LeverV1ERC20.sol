@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@rari-capital/solmate/src/tokens/ERC20.sol";
 
 // Lever V1 Lever Pool Token
-contract LeverV1LPT is ERC20 {
+contract LeverV1ERC20 is ERC20 {
   address public pool;
 
   event Mint(address indexed account, uint256 amount);
@@ -16,12 +16,10 @@ contract LeverV1LPT is ERC20 {
     _;
   }
 
-  constructor(
-    string memory _name,
-    string memory _symbol,
-    address _pool
-  ) ERC20(_name, _symbol) {
-    pool = _pool;
+  constructor(string memory _name, string memory _symbol)
+    ERC20(_name, _symbol, 18)
+  {
+    pool = msg.sender;
   }
 
   function mintTo(address account, uint256 amount)

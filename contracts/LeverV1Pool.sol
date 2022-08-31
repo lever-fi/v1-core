@@ -1,574 +1,289 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import { ILeverV1Pool } from "./interfaces/ILeverV1Pool.sol";
-import { IERC20Minimal } from "./tokens/interfaces/IERC20Minimal.sol";
-import { IERC721Minimal } from "./tokens/interfaces/IERC721Minimal.sol";
+import "./interfaces/ILeverV1Pool.sol";
 
-import { Installment, Loan, BorrowAssetData } from "./lib/V1PoolStructs.sol";
+import "./lib/ConversionMath.sol";
 
-import { LeverV1LPT } from "./tokens/LeverV1LPT.sol";
-import { LeverV1LPS } from "./tokens/LeverV1LPS.sol";
+import "./lib/Loan.sol";
+import "./lib/Installment.sol";
 
-import { PurchaseAgent } from "./PurchaseAgent.sol";
+import "./tokens/interfaces/IERC20Minimal.sol";
+import "./tokens/LeverV1ERC20.sol";
+import "./tokens/interfaces/IERC721Minimal.sol";
+import "./tokens/LeverV1ERC721.sol";
 
-//import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "./AgentRouter.sol";
+
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
-
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-// WETH setApproval
+contract LeverV1Pool is ILeverV1Pool, ERC721Holder, ReentrancyGuard {
+  using ConversionMath for uint256;
+  using ConversionMath for int256;
+  using Loan for mapping(bytes32 => Loan.Info);
+  using Loan for Loan.Info;
+  using Installment for Installment.Info[];
 
-// manual listing request for specific price
+  address public immutable override factory;
+  address public immutable override token;
+  address public immutable override token0;
+  address public immutable override token1;
 
-// set up autopay + preload. Autopay WETH only gets triggered if no more funds preloaded
-// borrowers can contribute ether to their outstanding loan balance, effectively making early payments, to maintain sufficient collateralization
+  uint64 public override coverageRatio;
+  uint64 public override interestRate;
+  uint64 public override fee;
+  uint32 public override chargeInterval;
+  uint32 public override loanTerm;
+  uint32 public override paymentFrequency;
 
-// min/max loanTerm
-// min/max interestRate (min + % to get max)
+  uint128 public override interestAccumulated;
+  uint128 public override minDeposit;
+  uint256 public override minLiquidity;
+  uint256 public override truePoolValue;
 
-// include loan principal into pool value calculations
+  address public override agentRouter;
+  address public override assetManager;
 
-contract LeverV1Pool is
-  ILeverV1Pool,
-  PurchaseAgent,
-  ERC721Holder,
-  ReentrancyGuard
-{
-  /*
-        [holdings] how much ETH has a certain address contributed
-        [principals] how much ETH does a borrower owe. Aggregated value
-        [positions] how much ETH does a borrower owe for a specific tokenId
+  uint32 lastCharge;
+  bool isPaused;
+  address owner;
 
-        [riskIndex] 0 - 100 how risky is the collection
-        [minLiquidity] minimum eth liquidity a pool will hold at any given time
-    */
-  mapping(address => uint256) public holdings;
-  mapping(address => uint256) public principals;
-  mapping(uint256 => Loan) public positions;
-  mapping(uint256 => address) public owners;
+  mapping(bytes32 => Loan.Info) public loans;
+  mapping(uint256 => bool) public override book;
 
-  /* 
-        positions vs activePositions
-        positions = tokenId mapping to Loan struct
-        activePositions = array consisting of activePosition tokenIds
-    */
-  // used for applying
-  uint256[] public activePositions;
-  uint256[] public liquidationQueue; // implement
-  uint256[] public collectorsQueue; // implement
-  //Offer[] public poolOffers; // implement (WETH only)
-  // add and remove from activepositions
+  // struct Params {
+  //   uint64 coverageRatio;
+  //   uint64 interestRate;
+  //   uint32 chargeInterval;
+  //   uint32 loanTerm;
+  //   uint32 paymentFrequenc;
+  //   uint128 interestAccumulated;
+  //   uint128 minDeposit;
+  //   uint256 minLiquidity;
+  //   uint256 truepoolValue;
+  //   address agentRouter;
+  //   address assetManager;
+  // }
 
-  // bytes to loan struct for checking specific loan status. one address can have multiple active loans
+  struct BorrowData {
+    uint256 tokenId;
+    uint256 price;
+    uint8 agentId;
+  }
 
-  address public immutable factory;
-  address public immutable originalCollection;
-  address public immutable syntheticCollection;
-  address public immutable poolToken;
-  address public immutable treasury;
-
-  //address public oracle;
-  //address public purchaseAgent;
-
-  uint256 public collateralCoverageRatio;
-  uint256 public interestRate;
-  uint256 public chargeInterval;
-  uint256 public burnRate;
-  uint256 public loanTerm;
-  uint256 public minLiquidity;
-  uint256 public minDeposit;
-  //uint256 public riskIndex;
-  uint256 public paymentFrequency;
-
-  address public deployer;
-  address public WETHContract;
-
-  string symbol;
-  uint256 lastCharge;
-  uint256 public truePoolValue;
-
-  event Unsuccessful(bytes data);
-
-  modifier onlyDeployer() {
-    require(msg.sender == deployer, "LeverV1Pool: Sender not Deployer");
+  modifier notPaused() {
+    require(isPaused == false, "Paused");
     _;
   }
 
-  /*
-    factory contract location
-    base rate at which principle interest starts
-    rate at which pool revenue is burnt
-    time difference between which a loan must be repaid
-    */
+  modifier onlyOwner() {
+    require(msg.sender == owner, "Not Owner");
+    _;
+  }
+
   constructor(
     address _factory,
-    //address _marketplace,
-    //address _oracle,
-    //address _purchaseAgent,
-    address _originalCollection,
-    uint256 _collateralCoverageRatio,
-    uint256 _interestRate,
-    uint256 _chargeInterval,
-    uint256 _burnRate,
-    uint256 _loanTerm,
+    address _token0,
+    uint64 _coverageRatio,
+    uint64 _interestRate,
+    uint64 _fee,
+    uint32 _chargeInterval,
+    uint32 _loanTerm,
+    uint32 _paymentFrequency,
+    uint128 _minDeposit,
     uint256 _minLiquidity,
-    uint256 _minDeposit,
-    uint256 _paymentFrequency,
-    address _deployer
-  ) PurchaseAgent(_originalCollection) {
+    address _agentRouter,
+    address _assetManager
+  ) {
+    owner = msg.sender;
     factory = _factory;
-    //marketplace = _marketplace;
-    //oracle = _oracle;
-    //purchaseAgent = _purchaseAgent;
-    originalCollection = _originalCollection;
-    collateralCoverageRatio = _collateralCoverageRatio;
+    token0 = _token0;
+    coverageRatio = _coverageRatio;
     interestRate = _interestRate;
+    fee = _fee;
     chargeInterval = _chargeInterval;
-    burnRate = _burnRate;
     loanTerm = _loanTerm;
-    minLiquidity = _minLiquidity;
-    minDeposit = _minDeposit;
-    deployer = _deployer;
     paymentFrequency = _paymentFrequency;
+    minDeposit = _minDeposit;
+    minLiquidity = _minLiquidity;
+    agentRouter = _agentRouter;
+    assetManager = _assetManager;
 
-    treasury = address(0);
+    string memory tk0Symbol = IERC721Minimal(token0).symbol();
+    string memory tkName = string(abi.encodePacked(tk0Symbol, "_LFI_LPT"));
+    string memory tk1Name = string(abi.encodePacked(tk0Symbol, "_LFI_LPS"));
 
-    IERC721Minimal OriginalCollection = IERC721Minimal(_originalCollection);
-    symbol = string(abi.encodePacked(OriginalCollection.symbol(), "_LFI_LPP"));
-    string memory tokenName = string(
-      abi.encodePacked(OriginalCollection.symbol(), "_LFI_LPT")
+    token1 = address(
+      new LeverV1ERC721(tk1Name, tk1Name, address(this), token0)
     );
-    string memory nftCollectionName = string(
-      abi.encodePacked(OriginalCollection.symbol(), "_LFI_LPS")
-    );
-
-    syntheticCollection = address(
-      new LeverV1LPS(
-        nftCollectionName,
-        nftCollectionName,
-        address(this),
-        _originalCollection
-      )
-    );
-    poolToken = address(new LeverV1LPT(tokenName, tokenName, address(this)));
-
-    emit Create(
-      _originalCollection,
-      _collateralCoverageRatio,
-      _interestRate,
-      _chargeInterval,
-      _burnRate,
-      _loanTerm,
-      _minLiquidity,
-      _minDeposit
-    );
+    token = address(new LeverV1ERC20(tkName, tkName));
   }
 
-  // deposit funds into pool and get lp tokens in return
-  function deposit() external payable override nonReentrant {
-    if (msg.value < minDeposit) {
-      revert Error_InsufficientBalance();
+  function _release(uint256 tokenId) internal {
+    IERC721Minimal tk0 = IERC721Minimal(token0);
+    LeverV1ERC721 tk1 = LeverV1ERC721(token1);
+
+    tk1.burn(tokenId);
+    tk0.transferFrom(address(this), msg.sender, tokenId);
+  }
+
+  function _borrow(bytes calldata borrowData, bytes calldata agentData)
+    internal
+  {
+    BorrowData memory _data = abi.decode(borrowData, (BorrowData));
+
+    require(book[_data.tokenId] == false, "Loan in progress");
+
+    Loan.Info storage loan = loans.get(msg.sender, _data.tokenId);
+    uint256 balance = address(this).balance;
+
+    if (
+      _data.price >= balance + msg.value ||
+      balance + msg.value - _data.price < minLiquidity
+    ) {
+      revert InsufficientLiquidity();
     }
 
-    IERC20Minimal PoolToken = IERC20Minimal(poolToken);
-    uint256 aPost = address(this).balance;
-    uint256 totalSupply = PoolToken.totalSupply();
-
-    uint256 split = (msg.value * 1 ether) / aPost;
-    uint256 amount;
-
-    if (totalSupply == 0) {
-      amount = msg.value;
-    } else {
-      amount = (split * totalSupply) / (1 ether - split);
+    if ((msg.value * 1 ether) / _data.price < coverageRatio) {
+      revert InsufficientContribution();
     }
 
-    bool success = PoolToken.mintTo(msg.sender, amount);
+    bool success = AgentRouter(agentRouter).purchase(_data.agentId, agentData);
 
     if (!success) {
-      revert Error_NotSuccessful();
+      revert Unsuccessful();
     }
 
+    LeverV1ERC721(token1).mint(msg.sender, _data.tokenId);
+    uint256 principal = _data.price - msg.value;
+    uint8 installmentCount = uint8(loanTerm / paymentFrequency);
+
+    loan.active = true;
+    loan.borrower = msg.sender;
+    loan.expirationTimestamp = block.timestamp + loanTerm;
+    loan.loanTerm = loanTerm;
+    loan.principal = principal;
+    loan.interest = 0;
+    loan.interestRate = interestRate / 365;
+    loan.chargeInterval = chargeInterval;
+    loan.lastCharge = block.timestamp;
+    loan.paymentFrequency = paymentFrequency;
+    loan.repaymentAllowance = 0;
+    loan.collateral = 0;
+
+    for (uint256 i = 0; i < loan.installmentsRemaining; i++) {
+      loan.installments[i].amount = principal / installmentCount;
+      loan.installments[i].dueBy =
+        block.timestamp +
+        ((i + 1) * loan.paymentFrequency);
+      //   Installment(
+      //     principal / installmentCount,
+      //     block.timestamp + ((i + 1) * loan.paymentFrequency)
+      //   )
+      // );
+    }
+
+    loan.installmentsRemaining = installmentCount;
+
+    emit Borrow(msg.sender, msg.value, _data.tokenId);
+  }
+
+  function _repay(uint256 tokenId) internal {
+    require(msg.value > 0, "Invalid repayment amount");
+    Loan.Info storage loan = loans.get(msg.sender, tokenId);
+    if (
+      !loan.active ||
+      loan.principal == 0 ||
+      block.timestamp > loan.expirationTimestamp ||
+      block.timestamp >
+      loan
+        .installments[loan.installments.length - loan.installmentsRemaining]
+        .dueBy
+    ) {
+      revert DeadLoan();
+    }
+
+    uint256 interest = loan.interest;
+    interestAccumulated += uint128(interest < msg.value ? interest : msg.value);
+
+    loan.repay(msg.value);
+
+    if (loan.principal == 0) {
+      book[tokenId] = false;
+      delete loans[keccak256(abi.encodePacked(msg.sender, tokenId))];
+      _release(tokenId);
+
+      emit LoanEvent(tokenId, uint8(LOAN_EVENT.CLOSED));
+    }
+
+    emit LoanRepay(tokenId, msg.value);
+  }
+
+  function deposit() external payable override {
+    require(msg.value > minDeposit, "Insufficient contribution");
+    IERC20Minimal _token0 = IERC20Minimal(token0);
     truePoolValue += msg.value;
-    emit Deposit(msg.sender, msg.value);
-  }
-
-  function collect(uint256 amountRequested) external override nonReentrant {
-    uint256 poolValue = truePoolValue; //address(this).balance;
-
-    IERC20Minimal PoolToken = IERC20Minimal(poolToken);
-    uint256 userBalance = PoolToken.balanceOf(msg.sender);
-
-    if (userBalance < amountRequested || userBalance == 0) {
-      revert Error_InsufficientBalance();
-    }
-
-    uint256 totalSupply = PoolToken.totalSupply();
-    uint256 owedBalance = (((amountRequested * 1 ether) / totalSupply) *
-      poolValue) / 1 ether;
-
-    if (address(this).balance < owedBalance) {
-      //if (poolValue <= owedBalance) {
-      // add to queue, transfer possible balance, and add throw
-      revert Error_InsufficientLiquidity();
-    }
-
-    bool success = PoolToken.burnFrom(msg.sender, amountRequested);
+    uint256 amountToMint = msg.value.computeTokenConversion(
+      truePoolValue,
+      _token0.totalSupply()
+    );
+    bool success = _token0.mintTo(msg.sender, amountToMint);
 
     if (!success) {
-      revert Error_NotSuccessful();
+      revert Unsuccessful();
     }
 
-    (bool sent, bytes memory data) = payable(msg.sender).call{
-      value: owedBalance
-    }(""); //.transfer(owedBalance);
-
-    if (!sent) {
-      emit Unsuccessful(data);
-      revert Error_NotSuccessful();
-    }
-
-    truePoolValue -= owedBalance;
-    emit Collect(msg.sender, owedBalance);
+    emit Deposit(msg.sender, msg.value, amountToMint);
   }
 
-  // sell asset before loans are paid off.
-  function quickSell(uint256 tokenId) external override {}
+  function collect(uint256 amount) external override {
+    IERC20Minimal tk = IERC20Minimal(token);
+    require(amount > 0 && amount <= tk.balanceOf(msg.sender), "Invalid amount");
+    uint256 amountToWithdraw = amount.computeEthConversion(
+      truePoolValue,
+      tk.totalSupply()
+    );
+    if (amountToWithdraw > address(this).balance) {
+      revert InsufficientLiquidity();
+    }
+    truePoolValue -= amountToWithdraw;
+    bool success = tk.burnFrom(msg.sender, amount);
 
-  function quickSell(uint256 tokenId, uint256 value) external override {}
+    if (!success) {
+      revert Unsuccessful();
+    }
 
-  // borrow funds to purchase NFTs
-  function borrow(bytes calldata assetData, bytes calldata purchaseData)
+    emit Collect(msg.sender, amountToWithdraw, amount);
+  }
+
+  function borrow(bytes calldata borrowData, bytes calldata agentData)
     external
     payable
     override
-    nonReentrant
   {
-    BorrowAssetData memory _assetData = abi.decode(
-      assetData,
-      (BorrowAssetData)
-    );
-
-    //check to see if tokenId exists in synthetic collection
-
-    if (
-      positions[_assetData.tokenId].active == true ||
-      positions[_assetData.tokenId].principal > 0
-    ) {
-      revert Error_ExistingLoan();
-    }
-
-    if (
-      _assetData.price >= address(this).balance + msg.value ||
-      address(this).balance + msg.value - _assetData.price < minLiquidity
-    ) {
-      revert Error_InsufficientLiquidity();
-    }
-
-    // retrieving token price
-    uint256 listingPrice = _assetData.price;
-
-    if ((msg.value * 1 ether) / listingPrice < collateralCoverageRatio) {
-      revert Error_InsufficientContribution();
-    }
-
-    // call PurchaseAgent
-    bool purchaseSuccess = purchase(_assetData.marketplace, purchaseData);
-
-    if (!purchaseSuccess) {
-      revert Error_NotSuccessful();
-    }
-
-    // if purchase success
-    LeverV1LPS(syntheticCollection).mint(msg.sender, _assetData.tokenId);
-
-    uint256 principal = listingPrice - msg.value;
-    uint256 installmentCount = loanTerm / paymentFrequency;
-
-    Loan storage _loan = positions[_assetData.tokenId];
-
-    _loan.lastCharge = block.timestamp;
-    _loan.principal = listingPrice - msg.value;
-    _loan.interest = 0;
-    _loan.dailyPercentRate = interestRate / 365;
-    _loan.paymentFrequency = paymentFrequency;
-    _loan.borrower = msg.sender;
-    _loan.createdTimestamp = block.timestamp;
-    _loan.expirationTimestamp = block.timestamp + loanTerm;
-    _loan.loanTerm = loanTerm;
-    _loan.finalizedTimestamp = 0;
-    _loan.active = true;
-    _loan.repaymentAllowance = 0;
-    _loan.installmentsRemaining = installmentCount;
-    _loan.collateral = 0;
-
-    for (uint256 i = 0; i < _loan.installmentsRemaining; i++) {
-      _loan.installments.push(
-        Installment(
-          principal / installmentCount,
-          block.timestamp + ((i + 1) * _loan.paymentFrequency)
-        )
-      );
-    }
-
-    //positions[_assetData.tokenId] = _loan;
-
-    emit Borrow(msg.sender, msg.value, _assetData.tokenId);
+    _borrow(borrowData, agentData);
   }
 
-  // borrowers pay back loan. If loan payment is complete, transfer NFT ownership
-  function repay(
-    uint256 tokenId /* bytes memory loanHash */
-  ) external payable override nonReentrant {
-    Loan storage _loan = positions[tokenId];
-    uint256 timeDifference = block.timestamp - _loan.lastCharge;
-    uint256 _msgValue = msg.value;
-
-    require(_msgValue > 0, "LeverV1Pool: can't repay nothing");
-    if (_msgValue == 0) {
-      //
-    }
-    require(_loan.active == true, "LeverV1Pool: inactive");
-    if (_loan.active == false) {
-      //
-    }
-    require(_loan.principal > 0, "LeverV1Pool: no principal");
-    if (_loan.principal == 0) {
-      //
-    }
-    require(
-      block.timestamp <= _loan.expirationTimestamp,
-      "LeverV1Pool: loan expired"
-    );
-    if (block.timestamp > _loan.expirationTimestamp) {
-      //
-    }
-    require(_loan.borrower == msg.sender, "LeverV1Pool: Mismatched borrowers");
-    if (_loan.borrower != msg.sender) {
-      //
-    }
-
-    require(timeDifference < paymentFrequency, "LeverV1Pool: times up");
-    if (timeDifference > paymentFrequency) {
-      //
-    }
-    uint256 _interestPayment = _loan.interest;
-    uint256 _principalPayment = _loan.principal;
-    //uint256 amountToRepay = _interestPayment + _principalPayment; //getRepaymentAmount(_loan);
-
-    // if msg.value is not sufficient enough to cover interest payment
-    if (_msgValue < _interestPayment) {
-      truePoolValue += _msgValue;
-      _loan.interest -= _msgValue; // subtract interest from msg value
-      // else just set interest to 0 and subtract from msg value
-    } else {
-      truePoolValue += _loan.interest;
-      _loan.interest = 0;
-      _msgValue -= _interestPayment;
-
-      if (_msgValue < _principalPayment) {
-        _loan.principal -= _msgValue;
-      } else {
-        _loan.principal = 0;
-      }
-
-      (uint256 _installmentSum, uint256 _firstIndex) = sumInstallments(tokenId);
-
-      // contribute to installment payments
-      // while value is still remaining, keep hacking off of installments
-      while (_msgValue > 0 && _installmentSum > 0) {
-        if (_msgValue < _loan.installments[_firstIndex].amount) {
-          _loan.installments[_firstIndex].amount -= _msgValue;
-          break;
-        } else {
-          _msgValue -= _loan.installments[_firstIndex].amount;
-          _loan.installmentsRemaining -= 1;
-          delete _loan.installments[_firstIndex];
-        }
-
-        (_installmentSum, _firstIndex) = sumInstallments(tokenId);
-      }
-
-      // loan has been successfully paid off
-      if (_loan.principal == 0) {
-        // ILeverV1LPS
-        LeverV1LPS _syntheticCollection = LeverV1LPS(syntheticCollection);
-        IERC721Minimal _originalCollection = IERC721Minimal(originalCollection);
-
-        _loan.principal = 0;
-        _loan.finalizedTimestamp = block.timestamp;
-        _loan.active = false;
-        //owners[tokenId] = address(0);
-        // redistrib collateral
-
-        // burn
-        _syntheticCollection.burn(tokenId);
-        // transfer NFT
-        _originalCollection.transferFrom(address(this), msg.sender, tokenId);
-      }
-    }
-
-    emit Repay(msg.sender, msg.value, tokenId);
+  function repay(uint256 tokenId) external payable override {
+    _repay(tokenId);
   }
 
-  function calculateInterest(uint256 _principal, uint256 _dailyPercentRate)
-    public
-    pure
-    returns (uint256)
-  {
-    return (_principal * _dailyPercentRate) / 1 ether;
+  //function batchRepay(uint256[] tokens, uint256[] values) external payable {}
+
+  function pause() external override onlyOwner {
+    isPaused = !isPaused;
   }
 
-  // chainlink keeper function
-  // maybe charge on a certain tokenId?
-  function chargeInterest() external override {
-    uint256 positionIndex = 0;
-    while (positionIndex < activePositions.length) {
-      uint256 position = activePositions[positionIndex];
-      bool shouldLiquidate = false;
+  function charge() external override onlyOwner {}
 
-      // do we subtract installmentsRemaining?
-      // if installment due date is less than current time, decrement
-      //
-      if (block.timestamp >= positions[position].installments[0].dueTimestamp) {
-        positions[position].installmentsRemaining -= 1;
-        if (
-          positions[position].installmentsRemaining == 0 ||
-          positions[position].installmentsRemaining <
-          positions[position].installments.length
-        ) {
-          shouldLiquidate = true;
-        }
-      }
+  function liquidate(bytes calldata assetData, bytes calldata agentData)
+    external
+    override
+    onlyOwner
+  {}
 
-      if (positions[position].expirationTimestamp > block.timestamp) {
-        shouldLiquidate = true;
-      }
-
-      if (shouldLiquidate) {
-        // trigger liquidation
-        activePositions[positionIndex] = activePositions[
-          activePositions.length - 1
-        ];
-        activePositions.pop();
-      } else {
-        positions[position].lastCharge = block.timestamp;
-        positions[position].interest += calculateInterest(
-          positions[position].principal,
-          positions[position].dailyPercentRate
-        );
-      }
-
-      positionIndex += 1;
-    }
-  }
-
-  function sumInstallments(uint256 tokenId)
-    internal
-    view
-    returns (uint256 sum, uint256 firstIndex)
-  {
-    bool indexFound = false;
-    for (uint256 i = 0; i < positions[tokenId].installments.length; i++) {
-      if (
-        positions[tokenId].installments[i].amount > 0 && indexFound == false
-      ) {
-        indexFound = true;
-        firstIndex = i;
-      }
-
-      sum += positions[tokenId].installments[i].amount;
-    }
-  }
-
-  function getTokenLoanStatus(uint256 tokenId)
-    public
-    view
-    returns (Loan memory)
-  {
-    return positions[tokenId];
-  }
-
-  function getEthToToken(uint256 ethAmount) public pure returns (uint256) {}
-  
-  function getPredictedToken(uint256 ethAmount) public pure returns (uint256) {}
-
-  function getTokenToEth(uint256 tokenAmount) public pure returns (uint256) {}
-
-
-  // liquidate current position - mindful of gas but oracle will handle
-  function liquidate(uint256 tokenId, uint256 value) external override {
-    // swap with offers or list on exchanges
-  }
-
-  // liquidate all NFTs in collection
-  function liquidateAll() external override {
-    // swap with offers or list on exchanges
-  }
-
-  // multisig, migrate assets, sender can only be from factory
-  function collapse() external {}
-
-  // offer for NFTs. Upon liquidation, orders will be matched against offers list before hitting other markets
-  function offer() external {}
-
-  function unwrap() public {
-    // get balance
-    /* 
-        deposit(){value: depositAmt}
-        withdraw(uint256 amt)
-        approve(address operator, uint256 amt)
-        */
-  }
+  function collapse() external override onlyOwner {}
 
   receive() external payable {}
-
-  // used for quickSell and liquidation
-  function _sell(uint256 tokenId, uint256 value) internal returns (bool) {
-    return false;
-  }
-
-  function canCharge() external view returns (bool) {
-    return lastCharge + chargeInterval >= block.timestamp;
-  }
-
-  function wenCharge() external view returns (uint256) {
-    return lastCharge + chargeInterval;
-  }
-
-  function setCollateralCoverageRatio(uint256 _collateralCoverageRatio)
-    external
-    onlyDeployer
-  {
-    collateralCoverageRatio = _collateralCoverageRatio;
-  }
-
-  function setInterestRate(uint256 _interestRate) external onlyDeployer {
-    interestRate = _interestRate;
-  }
-
-  function setChargeInterval(uint256 _chargeInterval) external onlyDeployer {
-    chargeInterval = _chargeInterval;
-  }
-
-  function setBurnRate(uint256 _burnRate) external onlyDeployer {
-    burnRate = _burnRate;
-  }
-
-  function setLoanTerm(uint256 _loanTerm) external onlyDeployer {
-    loanTerm = _loanTerm;
-  }
-
-  function setMinLiquidity(uint256 _minLiquidity) external onlyDeployer {
-    minLiquidity = _minLiquidity;
-  }
-
-  function setMinDeposit(uint256 _minDeposit) external onlyDeployer {
-    minDeposit = _minDeposit;
-  }
-
-  function setDeployer(address _deployer) external onlyDeployer {
-    deployer = _deployer;
-  }
 }
