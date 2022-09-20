@@ -12,19 +12,6 @@ contract LeverV1Factory is ILeverV1Factory {
   mapping(address => address) private _collectionPoolTable;
 
   address public owner;
-  event DeployPool(
-    address indexed pool,
-    address indexed token0,
-    uint256 coverageRatio,
-    uint256 interestRate,
-    uint256 fee,
-    uint256 chargeInterval,
-    uint256 loanTerm,
-    uint256 paymentFrequency,
-    uint256 minLiquidity,
-    uint256 minDeposit,
-    address indexed assetManager
-  );
 
   constructor() {
     owner = msg.sender;
@@ -38,17 +25,9 @@ contract LeverV1Factory is ILeverV1Factory {
   }
 
   function deployPool(
-    address token0,
-    uint64 coverageRatio,
-    uint64 interestRate,
-    uint64 fee,
-    uint32 chargeInterval,
-    uint32 loanTerm,
-    uint32 paymentFrequency,
-    uint128 minDeposit,
-    uint256 minLiquidity,
     address agentRouter,
-    address assetManager
+    address assetManager,
+    address token0
   ) external onlyOwner returns (address pool) {
     require(_collectionRegistry[token0] == false, "Collection is supported");
 
@@ -56,37 +35,29 @@ contract LeverV1Factory is ILeverV1Factory {
 
     pool = address(
       new LeverV1Pool(
-        address(this),
-        token0,
-        coverageRatio,
-        interestRate,
-        fee,
-        chargeInterval,
-        loanTerm,
-        paymentFrequency,
-        minDeposit,
-        minLiquidity,
         agentRouter,
-        assetManager
+        assetManager,
+        msg.sender,
+        address(this),
+        token0
       )
     );
 
     _poolRegistry[pool] = true;
     _collectionPoolTable[token0] = pool;
 
-    emit DeployPool(
-      pool,
-      token0,
-      coverageRatio,
-      interestRate,
-      fee,
-      chargeInterval,
-      loanTerm,
-      paymentFrequency,
-      minDeposit,
-      minLiquidity,
-      assetManager
-    );
+    /*
+    token0,
+    coverageRatio,
+    interestRate,
+    fee,
+    chargeInterval,
+    loanTerm,
+    paymentFrequency,
+    minDeposit,
+    minLiquidity,
+    */
+    emit DeployPool(pool, assetManager);
   }
 
   function setOwner(address newOwner) external onlyOwner {
