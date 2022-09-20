@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import { LooksRareOrderTypes } from "../libraries/LooksRareOrderTypes.sol";
+import "../libraries/LooksRareOrderTypes.sol";
 
 interface IExecutionStrategy {
   function canExecuteTakerAsk(
