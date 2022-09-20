@@ -3,8 +3,19 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 
+//import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
 import "contracts/LeverV1Factory.sol";
 import "contracts/LeverV1Pool.sol";
+import "contracts/interfaces/ILeverV1Pool.sol";
+import "contracts/AgentRouter.sol";
+import "contracts/agents/LooksRareAgent.sol";
+import "contracts/agents/OpenSeaAgent.sol";
+
+import "contracts/tokens/interfaces/IERC20Minimal.sol";
+import "contracts/tokens/interfaces/IERC721Minimal.sol";
+
+import "contracts/lib/ConversionMath.sol";
 
 error Error_InsufficientBalance();
 error Error_InsufficientLiquidity();
@@ -16,63 +27,97 @@ error Unauthorized();
 contract LeverV1PoolTest is Test {
   using stdStorage for StdStorage;
 
+  using ConversionMath for uint256;
+  using Loan for mapping(bytes32 => Loan.Info);
+  using Loan for Loan.Info;
+
+  bytes constant MAGIC_LR_BORROW_DATA =
+    hex"00000000000000000000000000000000000000000000000000000000000012aa00000000000000000000000000000000000000000000000437468af4f62100000000000000000000000000000000000000000000000000000000000000000001";
+  bytes constant MAGIC_LR_PURCHASE_DATA =
+    hex"000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000007ce30498e564f081ca65a226f44b1751f93a0f82000000000000000000000000bc4ca0eda7647a8ab7c2061c2e118a18a936f13d00000000000000000000000000000000000000000000000437468af4f621000000000000000000000000000000000000000000000000000000000000000012aa000000000000000000000000000000000000000000000000000000000000000100000000000000000000000056244bb70cbd3ea9dc8007399f61dfc065190031000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000631d14ae000000000000000000000000000000000000000000000000000000006344a168000000000000000000000000000000000000000000000000000000000000254e0000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001c19bf6d654eb32186dafba53b92d3e1f63d357ff14684e0c74e98ae3ee42041b15fddbb29b58a0ba2ef3a044c122a8d3315cef3286d026b30072242c19dd81bb60000000000000000000000000000000000000000000000000000000000000000";
+  uint256 constant MAGIC_LR_BLOCK = 15_541_900;
+
   address constant OS_EXCHANGE = 0x00000000006c3852cbEf3e08E8dF289169EdE581;
   address constant LR_EXCHANGE = 0x59728544B08AB483533076417FbBB2fD0B17CE3a;
   address constant BAYC = 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D;
   address constant DOODLE = 0x8a90CAb2b38dba80c64b7734e58Ee1dB38B8992e;
   address constant MOONBIRD = 0x23581767a106ae21c074b2276D25e5C3e136a68b;
 
-  bytes constant MAGIC_ASSET_DATA =
-    hex"0000000000000000000000000000000000000000000000000000000000000aca000000000000000000000000000000000000000000000004b4978c1d27e800000000000000000000000000000000000000000000000000000000000000000001";
-  bytes constant MAGIC_PURCHASE_DATA =
-    hex"0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000100000000000000000000000060a207e5b8babbed0528475094e585bbfe57c828000000000000000000000000bc4ca0eda7647a8ab7c2061c2e118a18a936f13d000000000000000000000000000000000000000000000004b4978c1d27e800000000000000000000000000000000000000000000000000000000000000000aca000000000000000000000000000000000000000000000000000000000000000100000000000000000000000056244bb70cbd3ea9dc8007399f61dfc065190031000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc200000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000006307c5d900000000000000000000000000000000000000000000000000000000632f52cd000000000000000000000000000000000000000000000000000000000000254e0000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001c36397c547b56c466da97fd23ddd9a2d98aa9229c96fef9511005df5b126ec431178162731a1cc087584fa721bbecc01f59eaafb688887401a251e5fa05fad1680000000000000000000000000000000000000000000000000000000000000000";
-
   LeverV1Factory public FACTORY;
   address payable public BAYC_POOL;
   address payable public DOODLE_POOL;
+  address payable public AGENT_ROUTER;
+  address payable public ASSET_MANAGER =
+    payable(0xbA842b7DA417Ba762D75e8F99e11c2980a8F8051);
 
   mapping(address => uint256) _multiDistribTokenBalance;
 
+  struct BorrowData {
+    uint256 tokenId;
+    uint256 price;
+    uint8 agentId;
+  }
+
   receive() external payable {}
 
-  // function deployPool(address collection)
-  //   internal
-  //   returns (address payable pool)
-  // {
-  //   pool = payable(
-  //     FACTORY.deployPool(
-  //       collection,
-  //       0.4 ether,
-  //       0.045 ether,
-  //       /* daily */
-  //       86400,
-  //       0.15 ether,
-  //       /* 4wks */
-  //       2419200,
-  //       1 ether,
-  //       0.05 ether,
-  //       /*weekly*/
-  //       604800
-  //     )
-  //   );
-  // }
+  function _deployPool(address collection)
+    internal
+    returns (address payable pool)
+  {
+    pool = payable(FACTORY.deployPool(AGENT_ROUTER, ASSET_MANAGER, collection));
+    AgentRouter _agentRouter = AgentRouter(AGENT_ROUTER);
+    ILeverV1Pool _pool = ILeverV1Pool(pool);
 
-  // function deposit(LeverV1Pool pool, uint256 amount) internal {
-  //   pool.deposit{ value: amount }();
-  // }
+    ILeverV1Pool(pool).setup(
+      0.4 ether,
+      0.045 ether,
+      0.15 ether, // 15%
+      86400, // daily
+      2419200, // 4wks
+      604800, // weekly
+      0.05 ether,
+      1 ether
+    );
 
-  // function collect(LeverV1Pool pool, uint256 amount) internal {
-  //   pool.collect(amount);
-  // }
+    // _agentRouter.setApprovalForAll(pool, collection, true);
+    // _agentRouter.setApprovalForAll(OS_EXCHANGE, collection, true);
+    // _agentRouter.setApprovalForAll(LR_EXCHANGE, collection, true);
 
-  // function borrow(
-  //   LeverV1Pool pool,
-  //   uint256 amount,
-  //   bytes memory assetData,
-  //   bytes memory purchaseData
-  // ) internal {
-  //   pool.borrow{ value: amount }(assetData, purchaseData);
-  // }
+    // _pool.approveExchange(OS_EXCHANGE, true);
+    // _pool.approveExchange(LR_EXCHANGE, true);
+  }
+
+  function _deposit(address payable pool, uint256 amount) internal {
+    ILeverV1Pool(pool).deposit{ value: amount }();
+  }
+
+  function _collect(address payable pool, uint256 amount) internal {
+    ILeverV1Pool(pool).collect(amount);
+  }
+
+  function _borrow(
+    address payable pool,
+    uint256 amount,
+    bytes memory borrowData,
+    bytes memory purchaseData
+  ) internal {
+    ILeverV1Pool(pool).borrow{ value: amount }(borrowData, purchaseData);
+  }
+
+  function _repay(
+    address payable pool,
+    uint256 amount,
+    uint256 tokenId
+  ) internal {
+    ILeverV1Pool(pool).repay{ value: amount }(tokenId);
+  }
+
+  function _charge(
+    address payable pool,
+    Loan.Charge[] memory charges
+  ) internal {
+    ILeverV1Pool(pool).charge(charges);
+  }
 
   // function repay(
   //   LeverV1Pool pool,
@@ -82,621 +127,822 @@ contract LeverV1PoolTest is Test {
   //   pool.repay{ value: amount }(tokenId);
   // }
 
-  // function ethToLiquidityToken(
-  //   ERC20 token,
-  //   uint256 currentBalance,
-  //   uint256 contribution
-  // ) internal view returns (uint256 amount) {
-  //   uint256 aPost = currentBalance + contribution;
-  //   uint256 totalSupply = token.totalSupply();
+  function setUp() public {
+    FACTORY = new LeverV1Factory();
+    AgentRouter agentRouter = new AgentRouter(address(FACTORY));
+    agentRouter.setAgent(
+      0,
+      "OPENSEA",
+      address(new OpenSeaAgent(0, address(agentRouter)))
+    );
+    agentRouter.setAgent(
+      1,
+      "LOOKSRARE",
+      address(new LooksRareAgent(1, address(agentRouter)))
+    );
 
-  //   if (totalSupply == 0) {
-  //     amount = contribution;
-  //   } else {
-  //     uint256 split = (contribution * 1 ether) / aPost;
-  //     amount = (split * totalSupply) / (1 ether - split);
-  //   }
-  // }
+    AGENT_ROUTER = payable(address(agentRouter));
+    BAYC_POOL = _deployPool(BAYC);
+    DOODLE_POOL = _deployPool(DOODLE);
+  }
 
-  // function liquidityTokenToEth(
-  //   ERC20 token,
-  //   uint256 poolValue,
-  //   uint256 amountRequested
-  // ) internal view returns (uint256 amount) {
-  //   uint256 totalSupply = token.totalSupply();
-  //   amount =
-  //     (((amountRequested * 1 ether) / totalSupply) * poolValue) /
-  //     1 ether;
-  // }
+  function testDeployUniquePool() public {
+    _deployPool(MOONBIRD);
+    assertEq(FACTORY.collectionExists(MOONBIRD), true);
+  }
 
-  // function setUp() public {
-  //   FACTORY = new LeverV1Factory();
-  //   BAYC_POOL = deployPool(BAYC);
-  //   DOODLE_POOL = deployPool(DOODLE);
-  // }
+  function testFailDeployDuplicatePool() public {
+    _deployPool(BAYC);
+  }
 
-  // function testDeployNewPool() public {
-  //   deployPool(MOONBIRD);
-  //   assertEq(FACTORY.collectionExists(MOONBIRD), true);
-  // }
+  function testFailDeployPoolNotOwner(address rand) public {
+    vm.assume(rand != address(0));
+    vm.assume(rand != FACTORY.owner());
+    //vm.expectRevert(Unauthorized.selector);
+    vm.prank(rand);
+    _deployPool(MOONBIRD);
+  }
 
-  // function testDeployDuplicatePool() public {
-  //   vm.expectRevert(DuplicatePool.selector);
-  //   deployPool(BAYC);
-  // }
+  function testSingleDeposit(address depositor, uint256 amount) public {
+    vm.assume(depositor != address(0));
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    vm.assume(amount >= baycPool.minDeposit());
+    IERC20Minimal token = IERC20Minimal(baycPool.token());
 
-  // function testDeployPoolAsNotOwner() public {
-  //   vm.expectRevert(Unauthorized.selector);
-  //   vm.prank(address(0));
-  //   deployPool(MOONBIRD);
-  // }
+    startHoax(depositor, amount);
+    _deposit(BAYC_POOL, amount);
+    vm.stopPrank();
 
-  // function testPoolDepositAndTokenDistribution(
-  //   address depositor,
-  //   uint256 amount
-  // ) public {
-  //   vm.assume(depositor != address(0));
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   uint256 minDeposit = baycPool.minDeposit();
+    assertEq(token.totalSupply(), amount);
+    assertEq(token.balanceOf(depositor), amount);
+  }
 
-  //   amount = bound(amount, minDeposit, 1000 ether);
+  function testFailInsufficientDeposit(address depositor, uint256 amount)
+    public
+  {
+    vm.assume(depositor != address(0));
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    vm.assume(amount < baycPool.minDeposit());
 
-  //   startHoax(depositor, amount);
-  //   deposit(baycPool, amount);
-  //   vm.stopPrank();
+    startHoax(depositor, amount);
+    _deposit(BAYC_POOL, amount);
+    vm.stopPrank();
+  }
 
-  //   assertEq(poolToken.totalSupply(), amount);
-  //   assertEq(poolToken.balanceOf(depositor), amount);
-  // }
+  function testMultiDeposit(uint256[10] memory deposits) public {
+    address[10] memory depositors;
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    IERC20Minimal token = IERC20Minimal(baycPool.token());
+    uint256 minDeposit = baycPool.minDeposit();
 
-  // function testInsufficientDepositAmount(address depositor, uint256 amount)
+    for (uint256 i = 0; i < deposits.length; i++) {
+      deposits[i] = bound(deposits[i], minDeposit, 1000 ether);
+      depositors[i] = address(uint160(deposits[i]));
+    }
+
+    for (uint256 i = 0; i < deposits.length; i++) {
+      uint256 tokenAmount = deposits[i].computeTokenConversion(
+        baycPool.truePoolValue() + deposits[i],
+        token.totalSupply()
+      );
+
+      _multiDistribTokenBalance[depositors[i]] += tokenAmount;
+
+      startHoax(depositors[i], deposits[i]);
+      _deposit(BAYC_POOL, deposits[i]);
+      vm.stopPrank();
+
+      assertEq(
+        token.balanceOf(depositors[i]),
+        _multiDistribTokenBalance[depositors[i]]
+      );
+    }
+  }
+
+  function testCollect(address depositor, uint256 amount) public {
+    // 0x1276ce79477787390E86877A0CD144b85b20e134 - broken
+    vm.assume(depositor != address(0));
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    vm.assume(amount > baycPool.minDeposit());
+    IERC20Minimal token = IERC20Minimal(baycPool.token());
+    uint256 minDeposit = baycPool.minDeposit();
+
+    amount = bound(amount, minDeposit, 1000 ether);
+
+    startHoax(depositor, amount);
+    _deposit(BAYC_POOL, amount);
+    // collect
+    uint256 balance = BAYC_POOL.balance;
+    uint256 tokensOwned = token.balanceOf(depositor);
+    uint256 toCollect = tokensOwned / 2;
+    uint256 totalSupply = token.totalSupply();
+    uint256 estimatedEthCollected = toCollect.computeEthConversion(
+      baycPool.truePoolValue(),
+      totalSupply
+    );
+    _collect(BAYC_POOL, toCollect);
+    vm.stopPrank();
+
+    assertEq(token.totalSupply(), totalSupply - toCollect);
+    assertEq(token.balanceOf(depositor), tokensOwned - toCollect);
+    assertEq(BAYC_POOL.balance, balance - estimatedEthCollected);
+  }
+
+  function testFailCollectInvalid(address depositor, uint256 amount) public {
+    vm.assume(depositor != address(0));
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    vm.assume(amount > baycPool.minDeposit());
+    IERC20Minimal token = IERC20Minimal(baycPool.token());
+
+    startHoax(depositor, amount);
+    _deposit(BAYC_POOL, amount);
+    _collect(BAYC_POOL, token.balanceOf(depositor) * 2);
+    vm.stopPrank();
+  }
+
+  function testDryPool(uint256[10] memory deposits) public {
+    address[10] memory depositors;
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    IERC20Minimal token = IERC20Minimal(baycPool.token());
+    uint256 minDeposit = baycPool.minDeposit();
+
+    for (uint256 i = 0; i < deposits.length; i++) {
+      deposits[i] = bound(deposits[i], minDeposit, 1000 ether);
+      depositors[i] = address(uint160(deposits[i]));
+
+      startHoax(depositors[i], deposits[i]);
+      _deposit(BAYC_POOL, deposits[i]);
+      vm.stopPrank();
+    }
+
+    for (uint256 i = 0; i < depositors.length; i++) {
+      uint256 tokenBalance = token.balanceOf(depositors[i]);
+      if (tokenBalance == 0) {
+        continue;
+      }
+
+      vm.startPrank(depositors[i]);
+      _collect(BAYC_POOL, tokenBalance);
+      vm.stopPrank();
+    }
+
+    assertEq(token.totalSupply(), 0);
+    assertEq(BAYC_POOL.balance, 0);
+    assertEq(baycPool.truePoolValue(), 0);
+  }
+
+  function testLoanOriginationLooksRare() public {
+    address depositor = address(1);
+    address borrower = address(2);
+
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
+
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
+
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
+
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+    uint256 expectedRemaining = baycPool.minLiquidity();
+    // uint256 expectedRemaining = borrowerContribution -
+    //   (_borrowData.price - depositorContribution);
+
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
+
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+
+    assertEq(BAYC_POOL.balance, expectedRemaining);
+    assertEq(token0.balanceOf(BAYC_POOL), 1);
+    assertEq(token1.totalSupply(), 1);
+    assertEq(token1.balanceOf(borrower), 1);
+
+    // check loan event emission
+
+    // check loan struct
+  }
+
+  // function testLoanOriginationOpenSea()
   //   public
   // {
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   vm.assume(amount < baycPool.minDeposit());
+  //   address depositor = address(1);
+  //   address borrower = address(2);
+  //   uint256 BLOCK_NUM = 15_540_550;
+  //   bytes
+  //     memory MAGIC_BORROW_DATA = hex"000000000000000000000000000000000000000000000000000000000000183e000000000000000000000000000000000000000000000003fecaff854a4a00000000000000000000000000000000000000000000000000000000000000000000";
+  //   bytes
+  //     memory MAGIC_PURCHASE_DATA = hex"0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000003fecaff854a4a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000975a416559f1f8b879b4f51b97e86972f8d7f87e000000000000000000000000004c00500000ad104d7dbd00e3ae0a5c00560c00000000000000000000000000bc4ca0eda7647a8ab7c2061c2e118a18a936f13d000000000000000000000000000000000000000000000000000000000000183e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000631f3a9300000000000000000000000000000000000000000000000000000000633337a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009722c7fcbc5a5d0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000003cba73f8b6cf98000000000000000000000000000975a416559f1f8b879b4f51b97e86972f8d7f87e0000000000000000000000000000000000000000000000001991dffceea840000000000000000000000000000000a26b00c1f0df003000390027140000faa7190000000000000000000000000000000000000000000000001991dffceea84000000000000000000000000000a858ddc0445d8131dac4d1de01f834ffcba52ef10000000000000000000000000000000000000000000000000000000000000041e9879e6d9d69bcf36cbc7e5cfcb9c5a64dcd00f9d79c69a900c3d95ab5d4db7e155f62bcd74f4e48bc9de95425cb34003ed03dc5705d18aeacfb4c523d957beb1b00000000000000000000000000000000000000000000000000000000000000";
+
   //   vm.assume(depositor != address(0));
-
-  //   startHoax(depositor, amount);
-  //   vm.expectRevert(Error_InsufficientBalance.selector);
-  //   deposit(baycPool, amount);
-  //   vm.stopPrank();
-  // }
-
-  // function testPoolMultiDepositAndTokenDistribution(
-  //   uint256[10] memory amounts,
-  //   address[10] memory depositors
-  // ) public {
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   uint256 minDeposit = baycPool.minDeposit();
-
-  //   for (uint256 i = 0; i < amounts.length; i++) {
-  //     amounts[i] = bound(amounts[i], minDeposit, 1000 ether);
-  //     depositors[i] = address(uint160(amounts[i]));
-  //   }
-
-  //   for (uint256 i = 0; i < amounts.length; i++) {
-  //     uint256 liquidityTokensOwned = ethToLiquidityToken(
-  //       poolToken,
-  //       BAYC_POOL.balance,
-  //       amounts[i]
-  //     );
-
-  //     _multiDistribTokenBalance[depositors[i]] += liquidityTokensOwned;
-
-  //     startHoax(depositors[i], amounts[i] + 0.1 ether);
-  //     deposit(baycPool, amounts[i]);
-  //     vm.stopPrank();
-
-  //     assertEq(
-  //       poolToken.balanceOf(depositors[i]),
-  //       _multiDistribTokenBalance[depositors[i]]
-  //     );
-  //   }
-  // }
-
-  // function testPoolCollectAndTokenDistribution(
-  //   address depositor,
-  //   uint256 amount
-  // ) public {
-  //   // 0x1276ce79477787390E86877A0CD144b85b20e134 - broken address
-  //   vm.assume(depositor != address(0));
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   uint256 minDeposit = baycPool.minDeposit();
-
-  //   amount = bound(amount, minDeposit, 1000 ether);
-
-  //   startHoax(depositor, amount);
-  //   // deposit
-  //   uint256 liquidityTokensOwned = ethToLiquidityToken(
-  //     poolToken,
-  //     BAYC_POOL.balance,
-  //     amount
-  //   );
-  //   deposit(baycPool, amount);
-  //   uint256 preTotalSupply = poolToken.totalSupply();
-  //   uint256 depositorTokenBalance = poolToken.balanceOf(depositor);
-  //   assertEq(preTotalSupply, liquidityTokensOwned);
-  //   assertEq(depositorTokenBalance, liquidityTokensOwned);
-  //   // collect
-  //   uint256 preBalance = BAYC_POOL.balance;
-  //   uint256 amountToCollect = depositorTokenBalance / 2;
-  //   uint256 ethToCollect = liquidityTokenToEth(
-  //     poolToken,
-  //     baycPool.truePoolValue(),
-  //     amountToCollect
-  //   );
-  //   console.log(preBalance);
-  //   console.log(amountToCollect);
-  //   console.log(ethToCollect);
-  //   collect(baycPool, amountToCollect);
-  //   vm.stopPrank();
-  //   uint256 postBalance = BAYC_POOL.balance;
-  //   assertEq(poolToken.totalSupply(), preTotalSupply - amountToCollect);
-  //   assertEq(
-  //     poolToken.balanceOf(depositor),
-  //     depositorTokenBalance - amountToCollect
-  //   );
-  //   assertEq(preBalance - ethToCollect, postBalance);
-  // }
-
-  // function testPoolCollectInvalidCollectionAmount(
-  //   address depositor,
-  //   uint256 amount
-  // ) public {
-  //   vm.assume(depositor != address(0));
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   uint256 minDeposit = baycPool.minDeposit();
-
-  //   amount = bound(amount, minDeposit, 1000 ether);
-
-  //   startHoax(depositor, amount);
-  //   // deposit
-  //   deposit(baycPool, amount);
-  //   uint256 depositorTokenBalance = poolToken.balanceOf(depositor);
-  //   // collect
-  //   uint256 amountToCollect = depositorTokenBalance * 2;
-  //   vm.expectRevert(Error_InsufficientBalance.selector);
-  //   collect(baycPool, amountToCollect);
-  //   vm.stopPrank();
-  // }
-
-  // function testPoolDryAndTokenDistribution(
-  //   uint256[10] memory amounts,
-  //   address[10] memory depositors
-  // ) public {
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   uint256 minDeposit = baycPool.minDeposit();
-
-  //   for (uint256 i = 0; i < amounts.length; i++) {
-  //     amounts[i] = bound(amounts[i], minDeposit, 1000 ether);
-  //     depositors[i] = address(uint160(amounts[i]));
-  //   }
-
-  //   // deposits
-  //   for (uint256 i = 0; i < amounts.length; i++) {
-  //     uint256 liquidityTokensOwned = ethToLiquidityToken(
-  //       poolToken,
-  //       BAYC_POOL.balance,
-  //       amounts[i]
-  //     );
-
-  //     _multiDistribTokenBalance[depositors[i]] += liquidityTokensOwned;
-
-  //     startHoax(depositors[i], amounts[i] + 0.1 ether);
-  //     deposit(baycPool, amounts[i]);
-  //     vm.stopPrank();
-
-  //     assertEq(
-  //       poolToken.balanceOf(depositors[i]),
-  //       _multiDistribTokenBalance[depositors[i]]
-  //     );
-  //   }
-
-  //   // collection
-  //   for (uint256 i = 0; i < depositors.length; i++) {
-  //     if (_multiDistribTokenBalance[depositors[i]] == 0) {
-  //       continue;
-  //     }
-  //     uint256 prePoolBalance = BAYC_POOL.balance;
-  //     uint256 amountToCollect = poolToken.balanceOf(depositors[i]);
-  //     _multiDistribTokenBalance[depositors[i]] = 0;
-  //     uint256 ethToCollect = liquidityTokenToEth(
-  //       poolToken,
-  //       baycPool.truePoolValue(),
-  //       amountToCollect
-  //     );
-  //     vm.startPrank(depositors[i]);
-  //     collect(baycPool, amountToCollect);
-  //     vm.stopPrank();
-
-  //     assertEq(poolToken.balanceOf(depositors[i]), 0);
-  //     assertEq(prePoolBalance - ethToCollect, BAYC_POOL.balance);
-  //   }
-  // }
-
-  // function testLoanOriginationWithValidParams(address lender, address borrower)
-  //   public
-  // {
-  //   BorrowAssetData memory _assetData = abi.decode(
-  //     MAGIC_ASSET_DATA,
-  //     (BorrowAssetData)
-  //   );
-
-  //   //vm.warp(1661311696);
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   ERC721Minimal originalCollection = ERC721Minimal(
-  //     baycPool.originalCollection()
-  //   );
-  //   ERC721Minimal syntheticCollection = ERC721Minimal(
-  //     baycPool.syntheticCollection()
-  //   );
-
-  //   uint256 lenderContribution = _assetData.price * 2;
-  //   uint256 borrowerContribution = (baycPool.collateralCoverageRatio() *
-  //     _assetData.price) /
-  //     1 ether +
-  //     1 ether;
-
-  //   vm.assume(lender != address(0));
   //   vm.assume(borrower != address(0));
+  //   BorrowData memory _borrowData = abi.decode(MAGIC_BORROW_DATA, (BorrowData));
 
-  //   // deposit
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, lenderContribution);
-  //   deposit(baycPool, lenderContribution);
+  //   ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+  //   IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+  //   IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
+
+  //   uint256 amountToContribute = (baycPool.coverageRatio() *
+  //     _borrowData.price) / 1 ether;
+  //   uint256 amountToDeposit = _borrowData.price -
+  //     amountToContribute +
+  //     baycPool.minLiquidity();
+  //   // uint256 expectedRemaining = amountToDeposit -
+  //   //   (_borrowData.price - amountToContribute);
+  //   uint256 expectedRemaining = baycPool.minLiquidity();
+
+  //   vm.roll(BLOCK_NUM);
+  //   startHoax(depositor, amountToDeposit);
+  //   _deposit(BAYC_POOL, amountToDeposit);
   //   vm.stopPrank();
-  //   assertEq(BAYC_POOL.balance, lenderContribution);
-  //   assertEq(poolToken.balanceOf(lender), lenderContribution);
 
-  //   // borrow
-  //   vm.roll(15_411_340);
-  //   startHoax(borrower, borrowerContribution);
-  //   //baycPool.borrow{ value: 50 ether }(MAGIC_ASSET_DATA, MAGIC_PURCHASE_DATA);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
+  //   vm.roll(BLOCK_NUM);
+  //   startHoax(borrower, amountToContribute);
+  //   _borrow(
+  //     BAYC_POOL,
+  //     amountToContribute,
+  //     MAGIC_BORROW_DATA,
   //     MAGIC_PURCHASE_DATA
   //   );
   //   vm.stopPrank();
-  //   uint256 expectedRemaining = lenderContribution -
-  //     (_assetData.price - borrowerContribution);
+
   //   assertEq(BAYC_POOL.balance, expectedRemaining);
-
-  //   // check synthetic asset count + ownership
-  //   assertEq(originalCollection.balanceOf(BAYC_POOL), 1);
-  //   assertEq(syntheticCollection.totalSupply(), 1);
-  //   assertEq(syntheticCollection.balanceOf(borrower), 1);
-
-  //   // check loan event emission
-
-  //   // check loan struct
+  //   assertEq(token0.balanceOf(BAYC_POOL), 1);
+  //   assertEq(token1.totalSupply(), 1);
+  //   assertEq(token1.balanceOf(borrower), 1);
   // }
 
-  // function testLoanOriginationWithInsufficientLiquidity(
-  //   address lender,
-  //   address borrower
-  // ) public {
-  //   //vm.warp(1661311696);
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
+  function testFailLoanLowLiquidity() public {
+    address depositor = address(1);
+    address borrower = address(2);
 
-  //   uint256 lenderContribution = baycPool.minLiquidity() / 2;
-  //   uint256 borrowerContribution = 1 ether;
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
 
-  //   vm.assume(lender != address(0));
-  //   vm.assume(borrower != address(0));
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
 
-  //   // deposit
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, lenderContribution);
-  //   deposit(baycPool, lenderContribution);
-  //   vm.stopPrank();
-  //   assertEq(BAYC_POOL.balance, lenderContribution);
-  //   assertEq(poolToken.balanceOf(lender), lenderContribution);
+    uint256 depositorContribution = baycPool.minLiquidity() / 2;
+    uint256 borrowerContribution = 1 ether;
 
-  //   // borrow
-  //   vm.roll(15_411_340);
-  //   startHoax(borrower, borrowerContribution);
-  //   vm.expectRevert(Error_InsufficientLiquidity.selector);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
-  //     MAGIC_PURCHASE_DATA
-  //   );
-  //   vm.stopPrank();
-  // }
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
 
-  // function testLoanOriginationWithInsufficientContribution(
-  //   address lender,
-  //   address borrower
-  // ) public {
-  //   BorrowAssetData memory _assetData = abi.decode(
-  //     MAGIC_ASSET_DATA,
-  //     (BorrowAssetData)
-  //   );
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution);
+    //vm.expectRevert(Error_InsufficientLiquidity.selector);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+  }
 
-  //   //vm.warp(1661311696);
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
+  function testFailLoanLowContribution() public {
+    address depositor = address(1);
+    address borrower = address(2);
 
-  //   uint256 lenderContribution = _assetData.price * 2;
-  //   uint256 borrowerContribution = 0 ether;
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
 
-  //   vm.assume(lender != address(0));
-  //   vm.assume(borrower != address(0));
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
 
-  //   // deposit
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, lenderContribution);
-  //   deposit(baycPool, lenderContribution);
-  //   vm.stopPrank();
-  //   assertEq(BAYC_POOL.balance, lenderContribution);
-  //   assertEq(poolToken.balanceOf(lender), lenderContribution);
+    uint256 depositorContribution = _borrowData.price * 2;
+    uint256 borrowerContribution = 0.1 ether;
 
-  //   // borrow
-  //   vm.roll(15_411_340);
-  //   startHoax(borrower, borrowerContribution);
-  //   vm.expectRevert(Error_InsufficientContribution.selector);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
-  //     MAGIC_PURCHASE_DATA
-  //   );
-  //   vm.stopPrank();
-  // }
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
 
-  // function testLoanOriginationOnActiveLoan(address lender, address borrower)
-  //   public
-  // {
-  //   BorrowAssetData memory _assetData = abi.decode(
-  //     MAGIC_ASSET_DATA,
-  //     (BorrowAssetData)
-  //   );
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution);
+    //vm.expectRevert(Error_InsufficientContribution.selector);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+  }
 
-  //   //vm.warp(1661311696);
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
+  // Fail loan origination if loan exists
+  function testFailLoanExistingLoan() public {
+    address depositor = address(1);
+    address borrower = address(2);
 
-  //   uint256 lenderContribution = _assetData.price * 2;
-  //   uint256 borrowerContribution = (baycPool.collateralCoverageRatio() *
-  //     _assetData.price) /
-  //     1 ether +
-  //     1 ether;
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
 
-  //   vm.assume(lender != address(0));
-  //   vm.assume(borrower != address(0));
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
 
-  //   // deposit
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, lenderContribution);
-  //   deposit(baycPool, lenderContribution);
-  //   vm.stopPrank();
-  //   assertEq(BAYC_POOL.balance, lenderContribution);
-  //   assertEq(poolToken.balanceOf(lender), lenderContribution);
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
 
-  //   // borrow
-  //   vm.roll(15_411_340);
-  //   startHoax(borrower, borrowerContribution);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
-  //     MAGIC_PURCHASE_DATA
-  //   );
-  //   vm.stopPrank();
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
 
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, borrowerContribution);
-  //   vm.expectRevert(Error_ExistingLoan.selector);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
-  //     MAGIC_PURCHASE_DATA
-  //   );
-  //   vm.stopPrank();
-  // }
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
 
-  // // function testLoanOriginationOnInvalidAsset(address lender, address borrower) public {
-  // //   BorrowAssetData memory _assetData = abi.decode(
-  // //     MAGIC_ASSET_DATA,
-  // //     (BorrowAssetData)
-  // //   );
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
 
-  // //   //vm.warp(1661311696);
-  // //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  // //   ERC20 poolToken = ERC20(baycPool.poolToken());
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, borrowerContribution);
+    //vm.expectRevert(Error_ExistingLoan.selector);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+  }
 
-  // //   uint256 lenderContribution = _assetData.price * 2;
-  // //   uint256 borrowerContribution = (baycPool.collateralCoverageRatio() *
-  // //     _assetData.price) /
-  // //     1 ether +
-  // //     1 ether;
+  function testFailLoanAssetInvalid() public {
+    address depositor = address(1);
+    address borrower = address(2);
 
-  // //   vm.assume(lender != address(0));
-  // //   vm.assume(borrower != address(0));
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
 
-  // //   // deposit
-  // //   vm.roll(15_200_000);
-  // //   startHoax(lender, lenderContribution);
-  // //   deposit(baycPool, lenderContribution);
-  // //   vm.stopPrank();
-  // //   assertEq(BAYC_POOL.balance, lenderContribution);
-  // //   assertEq(poolToken.balanceOf(lender), lenderContribution);
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
 
-  // //   // borrow
-  // //   vm.roll(15_200_000);
-  // //   startHoax(borrower, borrowerContribution);
-  // //   borrow(baycPool, borrowerContribution, MAGIC_ASSET_DATA, MAGIC_PURCHASE_DATA);
-  // //   vm.stopPrank();
-  // // }
+    ILeverV1Pool baycPool = ILeverV1Pool(BAYC_POOL);
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
 
-  // function testPartialLoanRepayment() public // address lender,
-  // // address borrower
-  // {
-  //   address lender = 0xbA842b7DA417Ba762D75e8F99e11c2980a8F8051;
-  //   address borrower = 0x09b1769771a78D147CaFc5cCC971a94bDA5C342a;
-  //   vm.label(lender, "alice");
-  //   vm.label(borrower, "bob");
-  //   BorrowAssetData memory _assetData = abi.decode(
-  //     MAGIC_ASSET_DATA,
-  //     (BorrowAssetData)
-  //   );
+    uint256 depositorContribution = _borrowData.price;
+    uint256 borrowerContribution = _borrowData.price / 2;
+    uint256 expectedRemaining = baycPool.minLiquidity();
 
-  //   //vm.warp(1661311696);
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   ERC721Minimal originalCollection = ERC721Minimal(
-  //     baycPool.originalCollection()
-  //   );
-  //   ERC721Minimal syntheticCollection = ERC721Minimal(
-  //     baycPool.syntheticCollection()
-  //   );
+    vm.roll(MAGIC_LR_BLOCK - 500_000);
+    vm.warp(1_662_063_126);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
 
-  //   uint256 lenderContribution = _assetData.price * 2;
-  //   uint256 borrowerContribution = (baycPool.collateralCoverageRatio() *
-  //     _assetData.price) /
-  //     1 ether +
-  //     1 ether;
-  //   uint256 repaymentContribution = 1 ether;
+    vm.roll(MAGIC_LR_BLOCK - 500_000);
+    vm.warp(1_662_063_126);
+    startHoax(borrower, borrowerContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+  }
 
-  //   vm.assume(lender != address(0));
-  //   vm.assume(borrower != address(0));
+  function testRepaymentPartial() public {
+    address depositor = address(1);
+    address borrower = address(2);
 
-  //   // deposit
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, lenderContribution);
-  //   deposit(baycPool, lenderContribution);
-  //   vm.stopPrank();
-  //   assertEq(BAYC_POOL.balance, lenderContribution);
-  //   assertEq(poolToken.balanceOf(lender), lenderContribution);
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
 
-  //   // borrow
-  //   vm.roll(15_411_340);
-  //   startHoax(borrower, borrowerContribution + repaymentContribution);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
-  //     MAGIC_PURCHASE_DATA
-  //   );
+    vm.label(depositor, "alice");
+    vm.label(borrower, "bob");
 
-  //   // repay
-  //   uint256 preBorrowerOriginalBalance = originalCollection.balanceOf(borrower);
-  //   uint256 preBorrowerSyntheticBalance = syntheticCollection.balanceOf(
-  //     borrower
-  //   );
-  //   Loan memory _loan = baycPool.getTokenLoanStatus(_assetData.tokenId);
-  //   uint256 loanPrincipal = _loan.principal;
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
 
-  //   repay(baycPool, repaymentContribution, _assetData.tokenId);
-  //   vm.stopPrank();
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
 
-  //   // loan n nft status change
-  //   _loan = baycPool.getTokenLoanStatus(_assetData.tokenId);
-  //   assertEq(_loan.active, true);
-  //   assertEq(_loan.principal, loanPrincipal - repaymentContribution);
-  //   assertEq(
-  //     _loan.installments[0].amount,
-  //     _loan.installments[_loan.installments.length - 1].amount -
-  //       repaymentContribution
-  //   );
-  //   assertEq(
-  //     originalCollection.balanceOf(borrower),
-  //     preBorrowerOriginalBalance
-  //   );
-  //   assertEq(
-  //     syntheticCollection.balanceOf(borrower),
-  //     preBorrowerSyntheticBalance
-  //   );
-  // }
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
 
-  // function testOverflowLoanRepayment() public {}
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+    uint256 repaymentContribution = 1 ether;
 
-  // function testCompleteLoanRepayment(address lender, address borrower) public {
-  //   vm.label(lender, "alice");
-  //   vm.label(borrower, "bob");
-  //   BorrowAssetData memory _assetData = abi.decode(
-  //     MAGIC_ASSET_DATA,
-  //     (BorrowAssetData)
-  //   );
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
 
-  //   //vm.warp(1661311696);
-  //   LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
-  //   ERC20 poolToken = ERC20(baycPool.poolToken());
-  //   ERC721Minimal originalCollection = ERC721Minimal(
-  //     baycPool.originalCollection()
-  //   );
-  //   ERC721Minimal syntheticCollection = ERC721Minimal(
-  //     baycPool.syntheticCollection()
-  //   );
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution + repaymentContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
 
-  //   uint256 lenderContribution = _assetData.price * 2;
-  //   uint256 borrowerContribution = (baycPool.collateralCoverageRatio() *
-  //     _assetData.price) /
-  //     1 ether +
-  //     1 ether;
-  //   uint256 repaymentContribution = _assetData.price - borrowerContribution;
+    // repay
+    uint256 preToken0Balance = token0.balanceOf(borrower);
+    uint256 preToken1Balance = token1.balanceOf(borrower);
 
-  //   vm.assume(lender != address(0));
-  //   vm.assume(borrower != address(0));
+    Loan.Info memory _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    uint256 loanPrincipal = _loan.principal;
 
-  //   // deposit
-  //   vm.roll(15_411_340);
-  //   startHoax(lender, lenderContribution);
-  //   deposit(baycPool, lenderContribution);
-  //   vm.stopPrank();
-  //   assertEq(BAYC_POOL.balance, lenderContribution);
-  //   assertEq(poolToken.balanceOf(lender), lenderContribution);
+    vm.roll(MAGIC_LR_BLOCK + 1);
 
-  //   // borrow
-  //   vm.roll(15_411_340);
-  //   startHoax(borrower, borrowerContribution + repaymentContribution);
-  //   borrow(
-  //     baycPool,
-  //     borrowerContribution,
-  //     MAGIC_ASSET_DATA,
-  //     MAGIC_PURCHASE_DATA
-  //   );
+    _repay(BAYC_POOL, repaymentContribution, _borrowData.tokenId);
 
-  //   // repay
-  //   uint256 preBorrowerOriginalBalance = originalCollection.balanceOf(borrower);
-  //   uint256 preBorrowerSyntheticBalance = syntheticCollection.balanceOf(
-  //     borrower
-  //   );
-  //   uint256 syntheticTotalSupply = syntheticCollection.totalSupply();
-  //   repay(baycPool, repaymentContribution, _assetData.tokenId);
-  //   vm.stopPrank();
+    // loan n nft status change
+    _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
 
-  //   // loan n nft status change
-  //   Loan memory _loan = baycPool.getTokenLoanStatus(_assetData.tokenId);
-  //   assertEq(_loan.active, false);
-  //   assertEq(_loan.principal, 0);
-  //   assertEq(
-  //     originalCollection.balanceOf(borrower),
-  //     preBorrowerOriginalBalance + 1
-  //   );
-  //   assertEq(
-  //     syntheticCollection.balanceOf(borrower),
-  //     preBorrowerSyntheticBalance - 1
-  //   );
-  //   assertEq(syntheticCollection.totalSupply(), syntheticTotalSupply - 1);
-  // }
+    assertEq(_loan.active, true);
+    assertEq(_loan.principal, loanPrincipal - repaymentContribution);
+    assertEq(
+      _loan.installments[0].amount,
+      _loan.installments[_loan.installments.length - 1].amount -
+        repaymentContribution
+    );
+    assertEq(token0.balanceOf(borrower), preToken0Balance);
+    assertEq(token1.balanceOf(borrower), preToken1Balance);
 
-  // function testInterestChargedLoanRepayment() public {}
+    vm.stopPrank();
+  }
 
-  // function testInterestChargedCompleteLoanRepayment() public {}
+  function testFailRepaymentOverflow() public {
+    address depositor = address(1);
+    address borrower = address(2);
+
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
+
+    vm.label(depositor, "alice");
+    vm.label(borrower, "bob");
+
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
+
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
+
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+    uint256 repaymentContribution = borrowerContribution;
+
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
+
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution + repaymentContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+
+    // repay
+    vm.roll(MAGIC_LR_BLOCK + 1);
+    _repay(BAYC_POOL, repaymentContribution, _borrowData.tokenId);
+    vm.stopPrank();
+  }
+
+  function testRepaymentComplete() public {
+    address depositor = address(1);
+    address borrower = address(2);
+
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
+
+    vm.label(depositor, "alice");
+    vm.label(borrower, "bob");
+
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
+
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
+
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
+
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+    uint256 repaymentContribution = _borrowData.price - borrowerContribution;
+
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
+
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution + repaymentContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+
+    // repay
+    uint256 preToken0Balance = token0.balanceOf(borrower);
+    uint256 preToken1Balance = token1.balanceOf(borrower);
+    uint256 preToken1TotalSupply = token1.totalSupply();
+
+    vm.roll(MAGIC_LR_BLOCK + 1);
+
+    _repay(BAYC_POOL, repaymentContribution, _borrowData.tokenId);
+
+    // check
+    Loan.Info memory _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    
+    assertEq(_loan.active, false);
+    assertEq(_loan.principal, 0);
+    assertEq(token0.balanceOf(borrower), preToken0Balance + 1);
+    assertEq(token1.balanceOf(borrower), preToken1Balance - 1);
+    assertEq(token1.totalSupply(), preToken1TotalSupply - 1);
+
+    vm.stopPrank();
+  }
+
+  function testInterestCharged() public {
+    address depositor = address(1);
+    address borrower = address(2);
+
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
+
+    vm.label(depositor, "alice");
+    vm.label(borrower, "bob");
+
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
+
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
+
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
+
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+    uint256 repaymentContribution = _borrowData.price - borrowerContribution;
+
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
+
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution + repaymentContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+
+    vm.roll(MAGIC_LR_BLOCK + 1);
+    Loan.Charge[] memory _charges = new Loan.Charge[](1);
+    Loan.Info memory _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    uint256 prePrincipal = _loan.principal;
+    uint256 preInterest = _loan.interest;
+    _charges[0] = Loan.Charge(
+      borrower,
+      _borrowData.tokenId
+    );
+    baycPool.charge(_charges);
+    _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+
+    assertEq(_loan.interest - preInterest, (prePrincipal * _loan.interestRate) / 1 ether);
+    vm.stopPrank();
+  }
+
+  function testInterestChargedPartialRepayment() public {
+    address depositor = address(1);
+    address borrower = address(2);
+
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
+
+    vm.label(depositor, "alice");
+    vm.label(borrower, "bob");
+
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
+
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
+
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
+
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+    uint256 repaymentContribution = 1 ether;
+
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
+
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+    vm.stopPrank();
+
+    vm.roll(MAGIC_LR_BLOCK + 1);
+    Loan.Charge[] memory _charges = new Loan.Charge[](1);
+
+    _charges[0] = Loan.Charge(
+      borrower,
+      _borrowData.tokenId
+    );
+
+    baycPool.charge(_charges);
+    vm.stopPrank();
+
+    Loan.Info memory _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    uint256 prePrincipal = _loan.principal;
+    uint256 preInterest = _loan.interest;
+
+    vm.roll(MAGIC_LR_BLOCK + 2);
+    startHoax(borrower, repaymentContribution);
+    
+    _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    _repay(BAYC_POOL, repaymentContribution, _borrowData.tokenId);
+    
+    _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+
+    assertEq(_loan.interest, 0);
+    assertEq(_loan.principal, prePrincipal + preInterest - repaymentContribution);
+    vm.stopPrank();
+  }
+
+  // function testInterestChargedMultiLoan() public {}
+
+  function testInterestChargedCompleteCycle() public {
+    address depositor = address(1);
+    address borrower = address(2);
+
+    vm.assume(depositor != address(0));
+    vm.assume(borrower != address(0));
+
+    vm.label(depositor, "alice");
+    vm.label(borrower, "bob");
+
+    BorrowData memory _borrowData = abi.decode(
+      MAGIC_LR_BORROW_DATA,
+      (BorrowData)
+    );
+
+    LeverV1Pool baycPool = LeverV1Pool(BAYC_POOL);
+
+    IERC721Minimal token0 = IERC721Minimal(baycPool.token0());
+    IERC721Minimal token1 = IERC721Minimal(baycPool.token1());
+
+    uint256 depositorContribution = (baycPool.coverageRatio() *
+      _borrowData.price) / 1 ether;
+    uint256 borrowerContribution = _borrowData.price -
+      depositorContribution +
+      baycPool.minLiquidity();
+
+    // deposit
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(depositor, depositorContribution);
+    _deposit(BAYC_POOL, depositorContribution);
+    vm.stopPrank();
+
+    // borrow
+    vm.roll(MAGIC_LR_BLOCK);
+    startHoax(borrower, borrowerContribution + 1 ether);
+    _borrow(
+      BAYC_POOL,
+      borrowerContribution,
+      MAGIC_LR_BORROW_DATA,
+      MAGIC_LR_PURCHASE_DATA
+    );
+
+    // uint256 preToken0Balance = token0.balanceOf(borrower);
+    // uint256 preToken1Balance = token1.balanceOf(borrower);
+    // uint256 preToken1TotalSupply = token1.totalSupply();
+
+    _repay(BAYC_POOL, 1 ether, _borrowData.tokenId);
+
+    vm.stopPrank();
+
+    vm.roll(MAGIC_LR_BLOCK + 1);
+    Loan.Charge[] memory _charges = new Loan.Charge[](1);
+
+    _charges[0] = Loan.Charge(
+      borrower,
+      _borrowData.tokenId
+    );
+
+    //Loan.Info memory _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    uint256 installmentsRemaining = baycPool.getLoan(borrower, _borrowData.tokenId).installmentsRemaining;
+    vm.stopPrank();
+
+    for (uint256 i = 0; i < installmentsRemaining; i++) {
+      _charge(BAYC_POOL, _charges);
+      //baycPool.charge(_charges);
+
+      Loan.Info memory _inFlightLoan = baycPool.getLoan(borrower, _borrowData.tokenId);
+      assertGt(_inFlightLoan.principal, 0);
+      uint256 repaymentContribution = _inFlightLoan.installments[i].amount + _inFlightLoan.interest;
+
+      vm.roll(MAGIC_LR_BLOCK + 2 + i);
+      startHoax(borrower, repaymentContribution);
+      _repay(BAYC_POOL, repaymentContribution, _borrowData.tokenId);
+      vm.stopPrank();
+    }
+
+    Loan.Info memory _loan = baycPool.getLoan(borrower, _borrowData.tokenId);
+    
+    assertEq(_loan.active, false);
+    assertEq(_loan.principal, 0);
+    assertEq(token0.balanceOf(borrower), 1);
+    assertEq(token1.balanceOf(borrower), 0);
+    assertEq(token1.totalSupply(), 0);
+  }
 
   // function testAssetLiquidation() public {}
 
-  // function testAssetLiquidationWithSomeRepayment() public {}
+  // function testAssetLiquidationPartialRepayment() public {}
 }
