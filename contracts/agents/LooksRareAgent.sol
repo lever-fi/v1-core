@@ -4,49 +4,40 @@ pragma solidity ^0.8.13;
 import "./Agent.sol";
 
 import "../integrations/LooksRare/interfaces/ILooksRareExchange.sol";
-import "../integrations/LooksRare/interfaces/IExecutionStrategy.sol";
-import "../integrations/LooksRare/libraries/LooksRareOrderTypes.sol";
 
 contract LooksRareAgent is Agent {
   using LooksRareOrderTypes for LooksRareOrderTypes.MakerOrder;
   using LooksRareOrderTypes for LooksRareOrderTypes.TakerOrder;
 
-  address public constant MARKETPLACE =
-    0x59728544B08AB483533076417FbBB2fD0B17CE3a;
+  address public constant EXCHANGE = 0x59728544B08AB483533076417FbBB2fD0B17CE3a;
+
+  constructor(uint8 _agentId, address router) Agent(_agentId, router) {}
 
   function _purchase(
+    address recipient,
     LooksRareOrderTypes.TakerOrder memory takerBid,
     LooksRareOrderTypes.MakerOrder memory makerAsk
-  ) private returns (bool) {
-    // ILooksRareExchange(LOOKSRARE_EXCHANGE).matchAskWithTakerBidUsingETHAndWETH{
-    //   value: makerAsk.price
-    // }(takerBid, makerAsk);
+  ) private returns (bool success) {
+    ILooksRareExchange(EXCHANGE).matchAskWithTakerBidUsingETHAndWETH{
+      value: msg.value
+    }(takerBid, makerAsk);
 
-    (bool success, bytes memory result) = LOOKSRARE_EXCHANGE.delegatecall(
-      abi.encodeWithSignature(
-        "matchAskWithTakerBidUsingETHAndWETH(LooksRareOrderTypes.TakerOrder,LooksRareOrderTypes.MakerOrer)",
-        takerBid,
-        makerAsk
-      )
+    IERC721Minimal(makerAsk.collection).safeTransferFrom(
+      address(this),
+      recipient,
+      makerAsk.tokenId
     );
 
-    //return success;
-    emit Purchase(
-      Marketplace.LOOKSRARE,
-      LOOKSRARE_EXCHANGE,
-      makerAsk.tokenId,
-      makerAsk.price
-    );
-
-    return success;
-    // 205-210
+    success = true;
   }
 
-  function purchase(bytes calldata data)
+  function purchase(address recipient, bytes calldata data)
     external
     payable
     override
-    returns (bool)
+    returns (bool success)
+  // address collection,
+  // uint256 tokenId
   {
     LooksRareOrderTypes.MakerOrder memory makerAsk = abi.decode(
       data,
@@ -63,6 +54,23 @@ contract LooksRareAgent is Agent {
         params: makerAsk.params
       });
 
-    _success = _purchase(takerBid, makerAsk);
+    success = _purchase(recipient, takerBid, makerAsk);
+
+    if (!success) {
+      revert BadRequest();
+    }
+
+    // collection = makerAsk.collection;
+    uint256 tokenId = makerAsk.tokenId;
+
+    emit Purchase(agentId, EXCHANGE, makerAsk.tokenId, makerAsk.price);
+  }
+
+  function setApprovalForAll(
+    address operator,
+    address collection,
+    bool state
+  ) external onlyOwner {
+    IERC721Minimal(collection).setApprovalForAll(EXCHANGE, state);
   }
 }

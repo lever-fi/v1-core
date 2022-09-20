@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "./interfaces/IAgent.sol";
+//import "@rari-capital/solmate/src/tokens/ERC721.sol";
+import "./tokens/interfaces/IERC721Minimal.sol";
+import "./agents/IAgent.sol";
 import "./interfaces/ILeverV1Factory.sol";
 
 contract AgentRouter {
-  address immutable factory;
+  address public immutable factory;
   mapping(uint8 => address) public agents;
 
   address public owner;
 
   event SetAgent(uint8 id, string name, address indexed location);
-  // require pool to be valid lever pool
 
   modifier onlyOwner() {
     require(msg.sender == owner, "Not owner");
@@ -19,11 +20,15 @@ contract AgentRouter {
   }
 
   modifier onlyPool() {
-    require(ILeverV1Factory(factory).isValidPool(msg.sender), "Sender be pool");
+    require(
+      ILeverV1Factory(factory).isValidPool(msg.sender),
+      "Sender must be pool"
+    );
     _;
   }
 
   constructor(address _factory) {
+    owner = msg.sender;
     factory = _factory;
   }
 
@@ -44,11 +49,30 @@ contract AgentRouter {
     returns (bool)
   {
     require(agents[agentId] != address(0), "Invalid agent");
+    return
+      IAgent(agents[agentId]).purchase{ value: msg.value }(msg.sender, data);
+    // (bool txnSuccess, bytes memory _data) = agents[agentId].delegatecall(
+    //   abi.encodeWithSignature("purchase(bytes)", data)
+    // );
+    // (bool fnSuccess, address collection, uint256 tokenId) = abi.decode(
+    //   _data,
+    //   (bool, address, uint256)
+    // );
 
-    (bool success, ) = agents[agentId].delegatecall(
-      abi.encodeWithSignature("purchase(bytes)", data)
-    );
+    // IERC721Minimal(collection).safeTransferFrom(
+    //   address(this),
+    //   msg.sender,
+    //   tokenId
+    // );
 
-    return success;
+    //return txnSuccess && fnSuccess;
   }
+
+  // function setApprovalForAll(
+  //   address operator,
+  //   address collection,
+  //   bool state
+  // ) external onlyOwner {
+  //   IERC721Minimal(collection).setApprovalForAll(operator, state);
+  // }
 }
