@@ -7,7 +7,7 @@ pragma solidity ^0.8.13;
 library ConversionMath {
   /// @notice convert eth to liquidity tokens
   /// @param w eth contributed
-  /// @param x eth value post contribution
+  /// @param x true eth value of pool post contribution
   /// @param y total supply of token
   /// @return z tokens
   function computeTokenConversion(
@@ -15,7 +15,7 @@ library ConversionMath {
     uint256 x,
     uint256 y
   ) internal pure returns (uint256 z) {
-    require(w >= x, "LT");
+    require(w > 0, "LT");
     if (y == 0) {
       z = w;
     } else {
@@ -27,7 +27,7 @@ library ConversionMath {
 
   /// @notice convert liquidity token to eth
   /// @param w tokens requested to convert
-  /// @param x total value of eth total token supply represents
+  /// @param x true eth value of pool
   /// @param y total supply of token
   /// @return z eth
   function computeEthConversion(
@@ -35,7 +35,7 @@ library ConversionMath {
     uint256 x,
     uint256 y
   ) internal pure returns (uint256 z) {
-    require(z > 0, "LT");
+    require(w > 0 && y > 0, "LT");
     z = (((w * 1 ether) / y) * x) / 1 ether;
   }
 
