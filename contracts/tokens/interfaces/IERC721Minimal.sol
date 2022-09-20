@@ -12,6 +12,12 @@ interface IERC721Minimal {
 
   function totalSupply() external view returns (uint256);
 
+  function safeTransferFrom(
+    address from,
+    address to,
+    uint256 id
+  ) external;
+
   function transferFrom(
     address from,
     address to,

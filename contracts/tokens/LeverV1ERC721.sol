@@ -6,6 +6,7 @@ import "@rari-capital/solmate/src/tokens/ERC721.sol";
 
 // Lever V1 Lever Pool Sythetic
 contract LeverV1ERC721 is ERC721 {
+  uint256 public totalSupply;
   address public pool;
   address public original;
 
@@ -34,6 +35,9 @@ contract LeverV1ERC721 is ERC721 {
     returns (bool)
   {
     _mint(account, tokenId);
+    unchecked {
+      totalSupply++;
+    }
 
     emit Mint(account, tokenId);
 
@@ -42,6 +46,9 @@ contract LeverV1ERC721 is ERC721 {
 
   function burn(uint256 tokenId) public onlyOwner returns (bool) {
     _burn(tokenId);
+    unchecked {
+      totalSupply--;
+    }
 
     emit Burn(tokenId);
 
