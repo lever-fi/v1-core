@@ -7,6 +7,7 @@ import "./pool/ILeverV1PoolErrors.sol";
 import "./pool/ILeverV1PoolEvents.sol";
 import "./pool/ILeverV1PoolState.sol";
 import "./pool/ILeverV1PoolImmutables.sol";
+import "./pool/ILeverV1PoolStructs.sol";
 
 interface ILeverV1Pool is
   ILeverV1PoolActions,
@@ -14,5 +15,6 @@ interface ILeverV1Pool is
   ILeverV1PoolErrors,
   ILeverV1PoolEvents,
   ILeverV1PoolState,
-  ILeverV1PoolImmutables
+  ILeverV1PoolImmutables,
+  ILeverV1PoolStructs
 {}

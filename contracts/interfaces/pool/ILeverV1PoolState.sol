@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import "../../lib/Installment.sol";
+import "../../lib/Loan.sol";
 
 interface ILeverV1PoolState {
   /// @notice min ratio for which borrower must cover cost of asset
@@ -22,8 +22,8 @@ interface ILeverV1PoolState {
   /// @notice how often payments are expected in seconds
   function paymentFrequency() external view returns (uint32);
 
-  /// @notice interest accumulated since last burn
-  function interestAccumulated() external view returns (uint128);
+  /// @notice interest accrued since last burn
+  function interestAccrued() external view returns (uint128);
 
   /// @notice minimum eth required from borrower to deposit in pool
   function minDeposit() external view returns (uint128);
@@ -41,27 +41,36 @@ interface ILeverV1PoolState {
   /// @notice automated EOA (listing manager, fund transfer)
   function assetManager() external view returns (address);
 
-  /// @notice returns loan info given key
+  // /// @notice returns loan info given key
   // function loans(bytes32 key)
   //   external
   //   view
-  //   returns (
-  //     bool active,
-  //     address borrower,
-  //     uint256 expirationTimestamp,
-  //     uint256 _loanTerm,
-  //     uint256 principal,
-  //     uint256 interest,
-  //     uint256 _interestRate,
-  //     uint256 chargeInterval,
-  //     uint256 _lastCharge,
-  //     uint256 _paymentFrequency,
-  //     uint256 repaymentAllowance,
-  //     uint256 collateral,
-  //     Installment.Info[] installments,
-  //     uint8 installmentsRemaining
-  //   );
+  //   returns (Loan.Info memory);
 
-  /// @notice tokenid mapped to loan state
-  function book(uint256 id) external view returns (bool);
+  // /// @notice tokenid mapped to loan state
+  // function book(uint256 id) external view returns (bool);
+
+  /// @notice keccak owner and tokenId mapped to loan
+  // function loans(bytes32 id) external view returns (
+  //   bool active,
+  //   address borrower,
+  //   uint256 expirationTimestamp,
+  //   uint256 loanTerm,
+  //   uint256 principal,
+  //   uint256 interest,
+  //   uint256 interestRate,
+  //   uint256 chargeInterval,
+  //   uint256 lastCharge,
+  //   uint256 paymentFrequency,
+  //   uint256 repaymentAllowance,
+  //   uint256 collateral,
+  //   Installment.Info[] memory installments,
+  //   uint8 installmentsRemaining
+  // );
 }
+
+/* 
+tuple(bool,address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint8)
+tuple(bool,address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,struct Installment.Info memory[] memory,uint8)
+
+ */

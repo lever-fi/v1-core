@@ -23,7 +23,12 @@ interface ILeverV1PoolEvents {
 
   event Collect(address indexed from, uint256 eth, uint256 tokens);
 
-  event Borrow(address indexed from, uint256 value, uint256 tokenId);
+  event Borrow(
+    address indexed from,
+    uint256 contribution,
+    uint256 cost,
+    uint256 tokenId
+  );
 
   event LoanRepay(uint256 tokenId, uint256 value);
 
