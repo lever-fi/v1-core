@@ -25,11 +25,6 @@ contract LeverV1Pool is ILeverV1Pool, ERC721Holder, ReentrancyGuard {
   using Loan for Loan.Info;
   using Installment for Installment.Info[];
 
-  address public immutable override factory;
-  address public immutable override token;
-  address public immutable override token0;
-  address public immutable override token1;
-
   uint64 public override coverageRatio;
   uint64 public override interestRate;
   uint64 public override fee;
@@ -41,6 +36,11 @@ contract LeverV1Pool is ILeverV1Pool, ERC721Holder, ReentrancyGuard {
   uint128 public override minDeposit;
   uint256 public override minLiquidity;
   uint256 public override truePoolValue;
+
+  address public immutable override factory;
+  address public immutable override token;
+  address public immutable override token0;
+  address public immutable override token1;
 
   address public override agentRouter;
   address public override assetManager;
