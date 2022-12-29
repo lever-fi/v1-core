@@ -7,6 +7,7 @@ import "@nomiclabs/hardhat-etherscan";
 import "@nomiclabs/hardhat-waffle";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
+import "hardhat-preprocessor";
 
 dotenv.config();
 
@@ -62,6 +63,10 @@ const config: HardhatUserConfig = {
     },
     rinkeby: {
       url: `https://eth-rinkeby.alchemyapi.io/v2/${process.env.ALCHEMY_KEY}`,
+      accounts: [`${process.env.PRIVATE_KEY}`],
+    },
+    goerli: {
+      url: `https://eth-goerli.alchemyapi.io/v2/${process.env.ALCHEMY_KEY}`,
       accounts: [`${process.env.PRIVATE_KEY}`],
     },
   },

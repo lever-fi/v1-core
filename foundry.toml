@@ -1,7 +1,34 @@
-[default]
-src = 'src'
+[profile.default]
+solc = '0.8.14'
+via_ir = true
+src = 'contracts'
 out = 'out'
-libs = ['lib']
-remappings = ['ds-test/=lib/ds-test/src/']
+libs = ['node_modules', 'lib']
+test = 'test/foundry'
+cache_path = 'forge-cache'
+remappings = [
+    'ds-test=lib/ds-test/src/',
+    'forge-std=lib/forge-std/src/',
+    '@rari-capital/solmate/=lib/solmate/',
+    'contracts/=contracts/',
+    'murky/=lib/murky/src/',
+    '@openzeppelin/=lib/openzeppelin-contracts/',
+]
+fuzz_runs = 5_000
+fuzz_maximum_global_rejects = 2_000_000
+optimizer_runs = 19_066
+gas_reports = ["LeverV1Factory", "LeverV1Pool"]
+
+[profile.optimized]
+out = 'optimized-out'
+
+[profile.test]
+via_ir = false
+src = 'test/foundry'
+
+[profile.lite]
+out = 'optimized-out'
+via_ir = false
+fuzz_runs = 1000
 
 # See more config options https://github.com/gakonst/foundry/tree/master/config
