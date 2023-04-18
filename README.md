@@ -1,4 +1,4 @@
-DISCLAIMER: Couldn't afford audits looooooool
+DISCLAIMER: Dom told me to change this.
 
 # Lever Pools - v1 Core
 
